@@ -1,0 +1,14 @@
+version: "3.3"
+services:
+    ffbo.neuroarch_component:
+        container_name: ffbo.neuroarch_component
+        tty: true
+        build:
+            context: .
+            dockerfile: ./Dockerfile
+        image: ffbo/ffbo.neuroarch_component
+        networks:
+            - ffbonet
+networks:
+    ffbonet:
+        external: true
