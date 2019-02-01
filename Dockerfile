@@ -51,7 +51,7 @@ RUN pip install cython
 RUN pip install simplejson
 
 RUN pip install daff path.py
-RUN pip install 'networkx==1.11'
+RUN pip install networkx
 
 
 RUN  apt-get -yq update && \

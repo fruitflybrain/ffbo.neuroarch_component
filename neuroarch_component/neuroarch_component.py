@@ -215,7 +215,8 @@ class neuroarch_server(object):
                         try:
                             #output= df[['sample','identifier','x','y','z','r','parent','name']].to_dict(orient='index')
                             #output= df.to_dict(orient='index')
-                            output = output.get_data(cls='MorphologyData', as_type='nx').node
+                            #output = output.get_data(cls='MorphologyData', as_type='nx').node
+                            output = dict(output.get_data(cls='MorphologyData', as_type='nx').nodes(data=True))
                         except KeyError:
                             output = {}
 
@@ -228,15 +229,18 @@ class neuroarch_server(object):
                             output = output.get_data()[0].to_dict(orient='index')
                     elif task['format'] == 'nx':
                         nx_graph = output.get_as('nx')
-                        output = {'nodes': nx_graph.node, 'edges': nx_graph.edge}
+                        #output = {'nodes': nx_graph.node, 'edges': nx_graph.edge}
+                        output = {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}
                     elif task['format'] == 'nk':
                         output = output.traverse_owned_by_get_toplevel()
                         for x in output['LPU']:
                             g = output['LPU'][x].get_as('nx')
-                            output['LPU'][x] = {'nodes': g.node, 'edges': g.edge}
+                            #output['LPU'][x] = {'nodes': g.node, 'edges': g.edge}
+                            output['LPU'][x] = {'nodes': dict(g.nodes(data=True)), 'edges': list(g.edges(data=True))}
                         for x in output['Pattern']:
                             g = output['Pattern'][x].get_as('nx')
-                            output['Pattern'][x] = {'nodes': g.node, 'edges': g.edge}
+                            #output['Pattern'][x] = {'nodes': g.node, 'edges': g.edge}
+                            output['Pattern'][x] = {'nodes': dict(g.nodes(data=True)), 'edges': list(g.edges(data=True))}
 
 
                     elif task['format'] == 'df':
@@ -511,6 +515,11 @@ class AppSession(ApplicationSession):
         self._current_concurrency -= 1
         self.log.info('na_query() ended ({invocations} invocations, current concurrency {current_concurrency} of max {max_concurrency})', invocations=self._invocations_served, current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency)
 
+    def na_query_on_error(self):
+        self._current_concurrency -= 1
+        self.log.info('na_query() encountered error ({invocations} invocations, current concurrency {current_concurrency} of max {max_concurrency})', invocations=self._invocations_served, current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency)
+
+
     @inlineCallbacks
     def onJoin(self, details):
         self._max_concurrency = 10
@@ -585,6 +594,7 @@ class AppSession(ApplicationSession):
                     if kw in task: args.append(task[kw])
                 if len(args)==1: args=args[0]
                 yield self.call(cmd_uri, {'commands': {task['verb']: [res, args]}})
+                self.na_query_on_end()
                 returnValue({'info':{'success':'Finished processing command'}})
             else:
                 if ('data_callback_uri' in task and 'queryID' in task):
