@@ -455,7 +455,7 @@ class query_processor():
 
 
 class user_list():
-    def __init__(self,state_limit=10):
+    def __init__(self, state_limit=10):
         self.list = {}
         self.state_limit = state_limit
         pass
@@ -464,7 +464,10 @@ class user_list():
         if user_id not in self.list:
             st = state.State(user_id)
             self.list[user_id] = {'state': st,
-                                  'server': neuroarch_server(user=st)}
+                                  'server': neuroarch_server(database = database,
+                                                             username = username,
+                                                             password = password,
+                                                             user=st)}
         return self.list[user_id]
 
     def cleanup(self):
@@ -557,7 +560,11 @@ class AppSession(ApplicationSession):
 
             self.log.info("na_query() called with task: {task} ,(current concurrency {current_concurrency} of max {max_concurrency})", current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency, task=task)
 
-            server = self.user_list.user(user_id)['server']
+            server = self.user_list.user(
+                                user_id,
+                                database=self.config.extra['database'],
+                                username = self.config.extra['username'],
+                                password = self.config.extra['password'])['server']
             (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
 
             uri = 'ffbo.ui.receive_msg.%s' % user_id
@@ -826,7 +833,11 @@ class AppSession(ApplicationSession):
             threshold = None
 
             self.log.info("na_get_data() called with task: {task}",task=task)
-            server = self.user_list.user(user_id)['server']
+            server = self.user_list.user(
+                            user_id,
+                            database=self.config.extra['database'],
+                            username = self.config.extra['username'],
+                            password = self.config.extra['password'])['server']
             try:
                 if not is_rid(task['id']):
                     returnValue({})
@@ -874,7 +885,11 @@ class AppSession(ApplicationSession):
                       else details.caller
             self.log.info("create_tag() called with task: {task} ",task=task)
 
-            server = self.user_list.user(user_id)['server']
+            server = self.user_list.user(
+                        user_id,
+                        database=self.config.extra['database'],
+                        username = self.config.extra['username'],
+                        password = self.config.extra['password'])['server']
             (output,succ) = server.receive_task({"command":{"retrieve":{"state":0}},"format":"qw"})
             if not succ:
                 return {"info":{"error":
@@ -911,7 +926,11 @@ class AppSession(ApplicationSession):
                       else details.caller
             self.log.info("retrieve_tag() called with task: {task} ",task=task)
 
-            server = self.user_list.user(user_id)['server']
+            server = self.user_list.user(
+                            user_id,
+                            database=self.config.extra['database'],
+                            username = self.config.extra['username'],
+                            password = self.config.extra['password'])['server']
             tagged_result = QueryWrapper.from_tag(graph=server.graph, tag=task['tag'])
             if tagged_result and tagged_result['metadata'] and tagged_result['metadata']!='{}':
                 server.user.append(tagged_result['qw'])
@@ -978,8 +997,7 @@ if __name__ == '__main__':
     from twisted.internet._sslverify import OpenSSLCertificateAuthorities
     from twisted.internet.ssl import CertificateOptions
     import OpenSSL.crypto
-
-
+    import getpass
 
     # parse command line parameters
     parser = argparse.ArgumentParser()
@@ -995,11 +1013,21 @@ if __name__ == '__main__':
                         default=intermediate_cert_file,
                         help='Intermediate PEM certificate file (defaults to value from config.ini).')
     parser.add_argument('--no-ssl', dest='ssl', action='store_false')
+    parser.add_argument('--database', dest='db', type=six.text_type, default='/na_server',
+                        help='Orientdb database folder name.')
+    parser.add_argument('--username', dest='user', type=six.text_type, default='root',
+                        help='User name in orientdb database.')
+    parser.add_argument('--password', dest='password', action='store_true',
+                        help='Allow password prompt for authenticate database access.')
     parser.set_defaults(ssl=ssl)
     parser.set_defaults(debug=debug)
 
     args = parser.parse_args()
 
+    if args.password:
+        pw = getpass.getpass()
+    else:
+        pw = 'root'
 
     # start logging
     if args.debug:
@@ -1008,7 +1036,8 @@ if __name__ == '__main__':
         txaio.start_logging(level='info')
 
    # any extra info we want to forward to our ClientSession (in self.config.extra)
-    extra = {'auth': True}
+    extra = {'auth': True, 'database': args.db, 'username': args.user,
+             'password': pw}
 
     if args.ssl:
         st_cert=open(args.ca_cert_file, 'rt').read()
