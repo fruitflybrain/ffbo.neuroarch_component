@@ -68,8 +68,8 @@ if "ip" in config["SERVER"]:
     ip = config["SERVER"]["ip"]
 else:
     ip = "ffbo.processor"
-port = config["NLP"]["expose-port"]
-url =  "%(ws)s://%(ip)s:%(port)s/ws" % {"ws":websockets, "ip":ip, "port":port}
+port = "{}{}".format(2,config["UNI"]['digits'])
+url =  "{}://{}:{}/ws".format(websockets, ip, port)
 realm = config["SERVER"]["realm"]
 authentication = eval(config["AUTH"]["authentication"])
 debug = eval(config["DEBUG"]["debug"])
