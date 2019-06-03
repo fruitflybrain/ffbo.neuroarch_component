@@ -21,7 +21,7 @@ ENV CBURL ws://crossbar:8080/ws
 ENV CBREALM realm1
 
 # install Autobahn|Python
-RUN pip install -U pip && pip install autobahn[twisted]
+RUN pip install -U pip && pip install autobahn[twisted]==18.12.1
 
 # Install Java
 RUN apt-get install -y --force-yes default-jre
