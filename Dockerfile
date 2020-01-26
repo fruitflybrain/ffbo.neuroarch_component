@@ -11,7 +11,7 @@ RUN echo "deb http://archive.ubuntu.com/ubuntu/ trusty main universe" >> /etc/ap
 RUN apt-get update
 
 # Install basic applications
-RUN apt-get install -y --force-yes tar git curl vim wget dialog net-tools build-essential 
+RUN apt-get install -y --force-yes tar git curl vim wget dialog net-tools build-essential
 
 # Install Python and Basic Python Tools
 RUN apt-get install -y --force-yes --force-yes python python-dev python-distribute python-pip
@@ -30,9 +30,6 @@ RUN apt-get install -y --force-yes default-jre
 RUN wget https://orientdb.com/download.php?file=orientdb-community-2.2.32.tar.gz
 RUN tar -xf download.php?file=orientdb-community-2.2.32.tar.gz -C /opt
 RUN mv /opt/orientdb-community-2.2.32 /opt/orientdb
-
-# Install basic applications
-RUN apt-get install -y --force-yes tar git curl vim wget dialog net-tools build-essential 
 
 
 # Install dependancies
@@ -54,7 +51,7 @@ RUN apt-get update
 
 # Install database
 WORKDIR /opt/orientdb/databases
-RUN wget -O ffbo_db.tar.gz https://www.dropbox.com/s/mjcs38m2we4uulr/ffbo_db_public.tar.gz?dl=0
+wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1c3vatD80nY5D2r3R2KGTOUdIIVKOteF1' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1c3vatD80nY5D2r3R2KGTOUdIIVKOteF1" -O ffbo_db.tar.gz && rm -rf /tmp/cookies.txt
 RUN tar zxvf ffbo_db.tar.gz
 WORKDIR /
 
