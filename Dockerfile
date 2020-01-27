@@ -32,7 +32,7 @@ RUN apt-get install -y --force-yes default-jre
 RUN wget https://orientdb.com/download.php?file=orientdb-community-2.2.32.tar.gz
 RUN tar -xf download.php?file=orientdb-community-2.2.32.tar.gz -C /opt
 RUN mv /opt/orientdb-community-2.2.32 /opt/orientdb
-
+RUN sed -e "s/-d64 //g" -i.backup /opt/orientdb/bin/server.sh
 
 # Install dependancies
 RUN pip install --upgrade pip
