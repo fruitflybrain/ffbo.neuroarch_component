@@ -5,6 +5,8 @@ export PYTHONPATH=/neuroarch:/usr/local/lib/python2.7/site-packages:/usr/lib/pyt
 sleep 25
 BASEDIR=$(dirname "$0")
 
+cd /neuroarch_component
+git pull
 cd /neuroarch
 git pull
 
