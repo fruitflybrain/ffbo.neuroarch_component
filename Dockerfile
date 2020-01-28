@@ -33,7 +33,8 @@ RUN apt-get install -y --force-yes default-jre
 # Install OrientDB
 RUN wget https://orientdb.com/download.php?file=orientdb-community-2.2.32.tar.gz && \
     tar -xf download.php?file=orientdb-community-2.2.32.tar.gz -C /opt && \
-    mv /opt/orientdb-community-2.2.32 /opt/orientdb
+    mv /opt/orientdb-community-2.2.32 /opt/orientdb && \
+    rm 'download.php?file=orientdb-community-2.2.32.tar.gz'
 RUN sed -e "s/-d64 //g" -i.backup /opt/orientdb/bin/server.sh
 
 # Install dependancies
