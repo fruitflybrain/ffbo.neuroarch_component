@@ -1,3 +1,5 @@
+# docker build -t fruitflybrain/ffbo.neuroarch_component:hemibrain .
+
 # Initialize image
 FROM python:2
 MAINTAINER Jonathan Marty <jonathan.n.marty@gmail.com>
@@ -29,19 +31,14 @@ RUN pip install -U pip && pip install autobahn[twisted]==18.12.1
 RUN apt-get install -y --force-yes default-jre
 
 # Install OrientDB
-RUN wget https://orientdb.com/download.php?file=orientdb-community-2.2.32.tar.gz
-RUN tar -xf download.php?file=orientdb-community-2.2.32.tar.gz -C /opt
-RUN mv /opt/orientdb-community-2.2.32 /opt/orientdb
+RUN wget https://orientdb.com/download.php?file=orientdb-community-2.2.32.tar.gz && \
+    tar -xf download.php?file=orientdb-community-2.2.32.tar.gz -C /opt &&
+    mv /opt/orientdb-community-2.2.32 /opt/orientdb
 RUN sed -e "s/-d64 //g" -i.backup /opt/orientdb/bin/server.sh
 
 # Install dependancies
 RUN pip install --upgrade pip
-RUN pip install numpy==1.14.5
-RUN pip install cython
-RUN pip install simplejson
-
-RUN pip install daff path.py
-RUN pip install 'networkx==1.11'
+RUN pip install numpy==1.14.5 cython simplejson daff path.py networkx==1.11
 
 
 RUN  apt-get -yq update && \
@@ -53,16 +50,13 @@ RUN apt-get update
 
 # Install database
 WORKDIR /opt/orientdb/databases
-RUN wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1c3vatD80nY5D2r3R2KGTOUdIIVKOteF1' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1c3vatD80nY5D2r3R2KGTOUdIIVKOteF1" -O ffbo_db.tar.gz && rm -rf /tmp/cookies.txt
-RUN tar zxvf ffbo_db.tar.gz
+RUN wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY" -O ffbo_db.tar.gz && rm -rf /tmp/cookies.txt && \
+    tar zxvf ffbo_db.tar.gz && \
+    rm ffbo_db.tar.gz
 WORKDIR /
 
 # Package that supports binary serialization for pyorient
-RUN pip install pyorient_native
-RUN pip install pyOpenSSL
-RUN pip install pandas
-RUN pip install service_identity
-RUN pip install configparser
+RUN pip install pyorient_native pyOpenSSL pandas service_identity configparser
 
 # Install from forked pyorient till binary serialization support
 # is integrated in the next release
