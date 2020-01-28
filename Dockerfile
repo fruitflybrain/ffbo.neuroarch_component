@@ -76,7 +76,7 @@ RUN pip install pyorient
 
 ENV ORIENTDB_ROOT_PASSWORD root
 
-ADD . /neuroarch_component
+RUN git clone https://github.com/fruitflybrain/ffbo.neuroarch_component /neuroarch_component
 RUN git clone https://github.com/fruitflybrain/neuroarch /neuroarch
 
 WORKDIR /neuroarch_component/neuroarch_component
