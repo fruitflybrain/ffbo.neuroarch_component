@@ -49,13 +49,6 @@ RUN apt-get clean
 RUN rm -r /var/lib/apt/lists/*
 RUN apt-get update
 
-# Install database
-WORKDIR /opt/orientdb/databases
-RUN wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY" -O ffbo_db.tar.gz && rm -rf /tmp/cookies.txt && \
-    tar zxvf ffbo_db.tar.gz && \
-    rm ffbo_db.tar.gz
-WORKDIR /
-
 # Package that supports binary serialization for pyorient
 RUN pip install pyorient_native pyOpenSSL pandas service_identity configparser
 
@@ -73,6 +66,12 @@ ENV ORIENTDB_ROOT_PASSWORD root
 
 RUN git clone --single-branch -b hemibrain https://github.com/fruitflybrain/ffbo.neuroarch_component /neuroarch_component
 RUN git clone https://github.com/fruitflybrain/neuroarch /neuroarch
+
+# Install database
+WORKDIR /opt/orientdb/databases
+RUN wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY" -O ffbo_db.tar.gz && rm -rf /tmp/cookies.txt && \
+    tar zxvf ffbo_db.tar.gz && \
+    rm ffbo_db.tar.gz
 
 WORKDIR /neuroarch_component/neuroarch_component
 
