@@ -31,10 +31,10 @@ RUN pip install -U pip && pip install autobahn[twisted]==18.12.1
 RUN apt-get install -y --force-yes default-jre
 
 # Install OrientDB
-RUN wget https://orientdb.com/download.php?file=orientdb-community-2.2.32.tar.gz && \
-    tar -xf download.php?file=orientdb-community-2.2.32.tar.gz -C /opt && \
-    mv /opt/orientdb-community-2.2.32 /opt/orientdb && \
-    rm 'download.php?file=orientdb-community-2.2.32.tar.gz'
+RUN wget https://s3.us-east-2.amazonaws.com/orientdb3/releases/2.2.37/orientdb-community-importers-2.2.37.zip && \
+    unzip orientdb-community-importers-2.2.37.zip -d /opt && \
+    mv /opt/orientdb-community-importers-2.2.37 /opt/orientdb && \
+    rm orientdb-community-importers-2.2.37.zip
 RUN sed -e "s/-d64 //g" -i.backup /opt/orientdb/bin/server.sh
 
 # Install dependancies
