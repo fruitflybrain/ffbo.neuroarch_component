@@ -630,15 +630,27 @@ class AppSession(ApplicationSession):
         @inlineCallbacks
         def get_data_sub(q):
             res = q.get_as('nx').node.values()[0]
-            ds = q.owned_by(cls='DataSource')
-            if ds.nodes:
-                res['data_source'] = [x.name for x in ds.nodes]
+            start = time.time()
+            qq = q.get_as('obj')[0][0]
+            ds = [n for n in qq.in_('Owns') if isinstance(n, models.DataSource)]
+            if len(ds):
+                res['data_source'] = [x.name for x in ds]
             else:
-                ds = q.get_data_qw().owned_by(cls='DataSource')
-                if ds.nodes:
-                    res['data_source'] = [x.name for x in ds.nodes]
+                qq = q.get_data_qw()
+                ds = [n for n in qq.in_('Owns') if isinstance(n, models.DataSource)]
+                if len(ds):
+                    res['data_source'] = [x.name for x in ds]
                 else:
                     res['data_source'] = ['Unknown']
+            # ds = q.owned_by(cls='DataSource')
+            # if ds.nodes:
+            #     res['data_source'] = [x.name for x in ds.nodes]
+            # else:
+            #     ds = q.get_data_qw().owned_by(cls='DataSource')
+            #     if ds.nodes:
+            #         res['data_source'] = [x.name for x in ds.nodes]
+            #     else:
+            #         res['data_source'] = ['Unknown']
 
             subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx').node
             ignore = ['name','uname','label','class']
@@ -672,12 +684,12 @@ class AppSession(ApplicationSession):
 
             post_syn_q = q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
             pre_syn_q = q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
+
             post_syn = post_syn_q.get_as('nx')
             pre_syn = pre_syn_q.get_as('nx')
             if post_syn.nodes() or pre_syn.nodes():
                 post_rids = str(post_syn.nodes()).replace("'","")
                 pre_rids = str(pre_syn.nodes()).replace("'","")
-
 
                 post_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % post_rids
                 pre_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % pre_rids
@@ -786,7 +798,6 @@ class AppSession(ApplicationSession):
                         }
                     }
                 })
-
             returnValue({'data':res})
 
         def is_rid(rid):
