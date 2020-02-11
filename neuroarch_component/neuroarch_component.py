@@ -632,12 +632,12 @@ class AppSession(ApplicationSession):
             res = q.get_as('nx').node.values()[0]
             start = time.time()
             qq = q.get_as('obj')[0][0]
-            ds = [n for n in qq.in_('Owns') if isinstance(n, models.DataSource)]
+            ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
             if len(ds):
                 res['data_source'] = [x.name for x in ds]
             else:
                 qq = q.get_data_qw()
-                ds = [n for n in qq.in_('Owns') if isinstance(n, models.DataSource)]
+                ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
                 if len(ds):
                     res['data_source'] = [x.name for x in ds]
                 else:
