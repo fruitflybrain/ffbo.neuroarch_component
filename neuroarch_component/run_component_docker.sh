@@ -1,9 +1,17 @@
+
+BASEDIR=$(dirname "$0")
+
 export PYTHONPATH=/neuroarch:/usr/local/lib/python2.7/site-packages:/usr/lib/python2.7/dist-packages/:$PYTHONPATH
 
 /opt/orientdb/bin/server.sh &
 
 sleep 25
-BASEDIR=$(dirname "$0")
+
+cd /neuroarch
+git pull
+cd /neuroarch_component/neuroarch_component
+git pull
+
 cd $BASEDIR
 
 if [ $# -eq 0 ]; then
@@ -21,5 +29,3 @@ if [ $# -eq 2 ]; then
     echo "Unrecognised argument"
   fi
 fi
-
-

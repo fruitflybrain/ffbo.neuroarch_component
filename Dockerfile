@@ -1,3 +1,5 @@
+# docker build -t fruitflybrain/ffbo.neuroarch_component:hemibrain .
+
 # Initialize image
 FROM python:2
 MAINTAINER Jonathan Marty <jonathan.n.marty@gmail.com>
@@ -8,6 +10,8 @@ ENV DEBIAN_FRONTEND noninteractive
 
 # Add the application resources URL
 RUN echo "deb http://archive.ubuntu.com/ubuntu/ trusty main universe" >> /etc/apt/sources.list
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 40976EAF437D05B5
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3B4FE6ACC0B21F32
 RUN apt-get update
 
 # Install basic applications
@@ -21,37 +25,21 @@ ENV CBURL ws://crossbar:8080/ws
 ENV CBREALM realm1
 
 # install Autobahn|Python
-RUN pip install -U pip && pip install autobahn[twisted]
+RUN pip install -U pip && pip install autobahn[twisted]==18.12.1
 
 # Install Java
 RUN apt-get install -y --force-yes default-jre
 
-# Install Java 8
-# RUN printf "\ndeb http://http.debian.net/debian jessie-backports main" >> /etc/apt/sources.list
-# RUN apt-get update
-# RUN apt-get install -y --force-yes -t jessie-backports openjdk-8-jre
-
-
 # Install OrientDB
-RUN wget https://orientdb.com/download.php?file=orientdb-community-2.2.32.tar.gz
-RUN tar -xf download.php?file=orientdb-community-2.2.32.tar.gz -C /opt
-RUN mv /opt/orientdb-community-2.2.32 /opt/orientdb
-
-# Increase memory for orientdb
-# RUN export ORIENTDB_OPTS_MEMORY="-Xms4g -Xmx48g -Dstorage.diskCache.bufferSize=65536"
-
-# Install basic applications
-RUN apt-get install -y --force-yes tar git curl vim wget dialog net-tools build-essential
-
+RUN wget https://s3.us-east-2.amazonaws.com/orientdb3/releases/2.2.37/orientdb-community-importers-2.2.37.zip && \
+    unzip orientdb-community-importers-2.2.37.zip -d /opt && \
+    mv /opt/orientdb-community-importers-2.2.37 /opt/orientdb && \
+    rm orientdb-community-importers-2.2.37.zip
+RUN sed -e "s/-d64 //g" -i.backup /opt/orientdb/bin/server.sh
 
 # Install dependancies
 RUN pip install --upgrade pip
-RUN pip install numpy==1.14.5
-RUN pip install cython
-RUN pip install simplejson
-
-RUN pip install daff path.py
-RUN pip install networkx
+RUN pip install numpy==1.14.5 cython simplejson daff path.py networkx==1.11
 
 
 RUN  apt-get -yq update && \
@@ -61,18 +49,8 @@ RUN apt-get clean
 RUN rm -r /var/lib/apt/lists/*
 RUN apt-get update
 
-# Install database
-WORKDIR /opt/orientdb/databases
-RUN wget -O ffbo_db.tar.gz https://www.dropbox.com/s/mjcs38m2we4uulr/ffbo_db_public.tar.gz?dl=0
-RUN tar zxvf ffbo_db.tar.gz
-WORKDIR /
-
 # Package that supports binary serialization for pyorient
-RUN pip install pyorient_native
-RUN pip install pyOpenSSL
-RUN pip install pandas
-RUN pip install service_identity
-RUN pip install configparser
+RUN pip install pyorient_native pyOpenSSL pandas service_identity configparser
 
 # Install from forked pyorient till binary serialization support
 # is integrated in the next release
@@ -86,8 +64,14 @@ RUN pip install pyorient
 
 ENV ORIENTDB_ROOT_PASSWORD root
 
-ADD . /neuroarch_component
+RUN git clone --single-branch -b hemibrain https://github.com/fruitflybrain/ffbo.neuroarch_component /neuroarch_component
 RUN git clone https://github.com/fruitflybrain/neuroarch /neuroarch
+
+# Install database
+WORKDIR /opt/orientdb/databases
+RUN wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY" -O ffbo_db.tar.gz && rm -rf /tmp/cookies.txt && \
+    tar zxvf ffbo_db.tar.gz && \
+    rm ffbo_db.tar.gz
 
 WORKDIR /neuroarch_component/neuroarch_component
 
