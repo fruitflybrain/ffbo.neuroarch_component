@@ -216,7 +216,7 @@ class neuroarch_server(object):
                             #output= df[['sample','identifier','x','y','z','r','parent','name']].to_dict(orient='index')
                             #output= df.to_dict(orient='index')
                             #output = output.get_data(cls='MorphologyData', as_type='nx').node
-                            output = dict(output.get_data(cls='MorphologyData', as_type='nx').nodes(data=True))
+                            output = dict(output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True))
                         except KeyError:
                             output = {}
 
@@ -629,30 +629,29 @@ class AppSession(ApplicationSession):
 
         @inlineCallbacks
         def get_data_sub(q):
-            res = q.get_as('nx').node.values()[0]
-            start = time.time()
-            qq = q.get_as('obj')[0][0]
-            ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
-            if len(ds):
-                res['data_source'] = [x.name for x in ds]
-            else:
-                qq = q.get_data_qw()
-                ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
-                if len(ds):
-                    res['data_source'] = [x.name for x in ds]
-                else:
-                    res['data_source'] = ['Unknown']
-            # ds = q.owned_by(cls='DataSource')
-            # if ds.nodes:
-            #     res['data_source'] = [x.name for x in ds.nodes]
+            res = q.get_as('nx', deepcopy = False).node.values()[0]
+            # qq = q.get_as('obj')[0][0]
+            # ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
+            # if len(ds):
+            #     res['data_source'] = [x.name for x in ds]
             # else:
-            #     ds = q.get_data_qw().owned_by(cls='DataSource')
-            #     if ds.nodes:
-            #         res['data_source'] = [x.name for x in ds.nodes]
+            #     qq = q.get_data_qw()
+            #     ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
+            #     if len(ds):
+            #         res['data_source'] = [x.name for x in ds]
             #     else:
             #         res['data_source'] = ['Unknown']
+            ds = q.owned_by(cls='DataSource')
+            if ds.nodes:
+                res['data_source'] = [x.name for x in ds.nodes]
+            else:
+                ds = q.get_data_qw().owned_by(cls='DataSource')
+                if ds.nodes:
+                    res['data_source'] = [x.name for x in ds.nodes]
+                else:
+                    res['data_source'] = ['Unknown']
 
-            subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx').node
+            subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx',edges=False,deepcopy=False).node
             ignore = ['name','uname','label','class']
             key_map = {'Transmitters': 'transmitters'}#'transgenic_lines': 'Transgenic Lines'}
             for x in subdata.values():
@@ -667,7 +666,7 @@ class AppSession(ApplicationSession):
                 except:
                     pass
 
-            arborization_data = q.get_data(cls='ArborizationData', as_type='nx').node
+            arborization_data = q.get_data(cls='ArborizationData', as_type='nx',edges=False,deepcopy=False).node
             ignore = ['name','uname','label','class']
             up_data = {}
 
@@ -682,82 +681,148 @@ class AppSession(ApplicationSession):
                 up_data.update({key_map[k]:x[k] for k in x if k not in ignore})
             if up_data: res['summary']['arborization_data'] = up_data
 
-            post_syn_q = q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
-            pre_syn_q = q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
+            post_syn=q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
+            pre_syn=q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
 
-            post_syn = post_syn_q.get_as('nx')
-            pre_syn = pre_syn_q.get_as('nx')
-            if post_syn.nodes() or pre_syn.nodes():
-                post_rids = str(post_syn.nodes()).replace("'","")
-                pre_rids = str(pre_syn.nodes()).replace("'","")
 
-                post_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % post_rids
-                pre_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % pre_rids
+            if len(post_syn.nodes) or len(pre_syn.nodes):
+                post_syn_dict = {}
+                synapses = post_syn.get_as('nx', edges=False, deepcopy = False)
+                synapse_rids = ','.join(list(synapses.nodes()))
+                n_rec=q._graph.client.command("SELECT $path from (traverse out('SendsTo') FROM [{}] maxdepth 1)".format(synapse_rids))
+                ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
+                neuron_rids = list(set(ntos.keys()))
+                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids).get_as('nx', edges=False, deepcopy=False)
 
-                post_map_l = [x.oRecordData['$path'] for x in q._graph.client.command(post_map_command)]
-                pre_map_l = [x.oRecordData['$path'] for x in q._graph.client.command(pre_map_command)]
-
-                post_map = {}
-                pre_map = {}
-
-                for p in post_map_l:
-                    m = re.findall('\#\d+\:\d+', p)
-                    if len(m)==2:
-                        post_map[m[0]] = m[1]
-
-                for p in pre_map_l:
-                    m = re.findall('\#\d+\:\d+', p)
-                    if len(m)==2:
-                        pre_map[m[0]] = m[1]
+                post_rids = ','.join(list(neurons.nodes()))
+                post_map_command = "select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'".format(post_rids,synapse_rids)
+                post_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in q._graph.client.command(post_map_command)] if len(n)==2}
 
                 post_data = []
-                for (syn, neu) in post_syn.edges():
-                    if not (post_syn.node[syn]['class']  == 'InferredSynapse' or
-                            post_syn.node[syn]['class']  == 'Synapse'):
-                        continue
+                for neu_id, syn_id in ntos.items():
                     info = {'has_morph': 0, 'has_syn_morph': 0}
-                    if 'N' not in post_syn.node[syn]:
-                        print post_syn.node[syn]
-                        info['number'] = 1
-                    else:
-                        info['number'] =  post_syn.node[syn]['N']
-                    if neu in post_map:
+                    info['number'] = synapses.node[syn_id].get('N', 1)
+                    if neu_id in post_map_l:
                         info['has_morph'] = 1
-                        info['rid'] = post_map[neu]
-                    if syn in post_map:
+                        info['rid'] = post_map_l[neu_id]
+                    if syn_id in post_map_l:
                         info['has_syn_morph'] = 1
-                        info['syn_rid'] = post_map[syn]
-                        if 'uname' in post_syn.node[syn]:
-                            info['syn_uname'] = post_syn.node[syn]['uname']
-                    info['inferred'] = (post_syn.node[syn]['class'] == 'InferredSynapse')
-                    info.update(post_syn.node[neu])
+                        info['syn_rid'] = post_map_l[syn_id]
+                        if 'uname' in synapses.node[syn_id]:
+                            info['syn_uname'] = synapses.node[syn_id]['uname']
+                    info['inferred'] = (synapses.node[syn_id]['class'] == 'InferredSynapse')
+                    info.update(neurons.node[neu_id])
                     post_data.append(info)
-
                 post_data = sorted(post_data, key=lambda x: x['number'])
 
+                pre_syn_dict = {}
+                synapses = pre_syn.get_as('nx', edges=False, deepcopy = False)
+                synapse_rids = ','.join(list(synapses.nodes()))
+                n_rec=q._graph.client.command("SELECT $path from (traverse in('SendsTo') FROM [{}] maxdepth 1)".format(synapse_rids))
+                ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
+                neuron_rids = list(set(ntos.keys()))
+                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids).get_as('nx', edges=False, deepcopy=False)
+
+                pre_rids = ','.join(list(neurons.nodes()))
+                pre_map_command = "select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'".format(pre_rids, synapse_rids)
+                pre_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in q._graph.client.command(pre_map_command)] if len(n)==2}
+
+
                 pre_data = []
-                for (neu, syn) in pre_syn.edges():
-                    if not (pre_syn.node[syn]['class']  == 'InferredSynapse' or
-                            pre_syn.node[syn]['class']  == 'Synapse'):
-                        continue
+                for neu_id, syn_id in ntos.items():
                     info = {'has_morph': 0, 'has_syn_morph': 0}
-                    if 'N' not in pre_syn.node[syn]:
-                        print pre_syn.node[syn]
-                        info['number'] = 1
-                    else:
-                        info['number'] =  pre_syn.node[syn]['N']
-                    if neu in pre_map:
+                    info['number'] = synapses.node[syn_id].get('N', 1)
+                    if neu_id in pre_map_l:
                         info['has_morph'] = 1
-                        info['rid'] = pre_map[neu]
-                    if syn in pre_map:
+                        info['rid'] = pre_map_l[neu_id]
+                    if syn_id in pre_map_l:
                         info['has_syn_morph'] = 1
-                        info['syn_rid'] = pre_map[syn]
-                        if 'uname' in pre_syn.node[syn]:
-                            info['syn_uname'] = pre_syn.node[syn]['uname']
-                    info['inferred'] = (pre_syn.node[syn]['class'] == 'InferredSynapse')
-                    info.update(pre_syn.node[neu])
+                        info['syn_rid'] = pre_map_l[syn_id]
+                        if 'uname' in synapses.node[syn_id]:
+                            info['syn_uname'] = synapses.node[syn_id]['uname']
+                    info['inferred'] = (synapses.node[syn_id]['class'] == 'InferredSynapse')
+                    info.update(neurons.node[neu_id])
                     pre_data.append(info)
                 pre_data = sorted(pre_data, key=lambda x: x['number'])
+
+            # OLDER IMPLEMENTATION
+            # post_syn_q = q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
+            # pre_syn_q = q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
+            # post_syn_q.execute_edges(edge_class = 'SendsTo')
+            # post_syn = post_syn_q.get_as('nx', deepcopy = False)
+            # pre_syn_q.execute_edges(edge_class = 'SendsTo')
+            # pre_syn = pre_syn_q.get_as('nx', deepcopy = False)
+            # if post_syn.nodes() or pre_syn.nodes():
+            #     post_rids = str(post_syn.nodes()).replace("'","")
+            #     pre_rids = str(pre_syn.nodes()).replace("'","")
+            #
+            #     post_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % post_rids
+            #     pre_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % pre_rids
+            #
+            #     post_map_l = [x.oRecordData['$path'] for x in q._graph.client.command(post_map_command)]
+            #     pre_map_l = [x.oRecordData['$path'] for x in q._graph.client.command(pre_map_command)]
+            #
+            #     post_map = {}
+            #     pre_map = {}
+            #
+            #     for p in post_map_l:
+            #         m = re.findall('\#\d+\:\d+', p)
+            #         if len(m)==2:
+            #             post_map[m[0]] = m[1]
+            #
+            #     for p in pre_map_l:
+            #         m = re.findall('\#\d+\:\d+', p)
+            #         if len(m)==2:
+            #             pre_map[m[0]] = m[1]
+            #
+            #     post_data = []
+            #     for (syn, neu) in post_syn.edges():
+            #         if not (post_syn.node[syn]['class']  == 'InferredSynapse' or
+            #                 post_syn.node[syn]['class']  == 'Synapse'):
+            #             continue
+            #         info = {'has_morph': 0, 'has_syn_morph': 0}
+            #         if 'N' not in post_syn.node[syn]:
+            #             print post_syn.node[syn]
+            #             info['number'] = 1
+            #         else:
+            #             info['number'] =  post_syn.node[syn]['N']
+            #         if neu in post_map:
+            #             info['has_morph'] = 1
+            #             info['rid'] = post_map[neu]
+            #         if syn in post_map:
+            #             info['has_syn_morph'] = 1
+            #             info['syn_rid'] = post_map[syn]
+            #             if 'uname' in post_syn.node[syn]:
+            #                 info['syn_uname'] = post_syn.node[syn]['uname']
+            #         info['inferred'] = (post_syn.node[syn]['class'] == 'InferredSynapse')
+            #         info.update(post_syn.node[neu])
+            #         post_data.append(info)
+            #
+            #     post_data = sorted(post_data, key=lambda x: x['number'])
+            #
+            #     pre_data = []
+            #     for (neu, syn) in pre_syn.edges():
+            #         if not (pre_syn.node[syn]['class']  == 'InferredSynapse' or
+            #                 pre_syn.node[syn]['class']  == 'Synapse'):
+            #             continue
+            #         info = {'has_morph': 0, 'has_syn_morph': 0}
+            #         if 'N' not in pre_syn.node[syn]:
+            #             print pre_syn.node[syn]
+            #             info['number'] = 1
+            #         else:
+            #             info['number'] =  pre_syn.node[syn]['N']
+            #         if neu in pre_map:
+            #             info['has_morph'] = 1
+            #             info['rid'] = pre_map[neu]
+            #         if syn in pre_map:
+            #             info['has_syn_morph'] = 1
+            #             info['syn_rid'] = pre_map[syn]
+            #             if 'uname' in pre_syn.node[syn]:
+            #                 info['syn_uname'] = pre_syn.node[syn]['uname']
+            #         info['inferred'] = (pre_syn.node[syn]['class'] == 'InferredSynapse')
+            #         info.update(pre_syn.node[neu])
+            #         pre_data.append(info)
+            #     pre_data = sorted(pre_data, key=lambda x: x['number'])
 
                 # Summary PreSyn Information
                 pre_sum = {}
@@ -807,7 +872,7 @@ class AppSession(ApplicationSession):
                 return False
 
         def get_syn_data_sub(q):
-            res = q.get_as('nx').node.values()[0]
+            res = q.get_as('nx', deepcopy = False).node.values()[0]
             ds = q.owned_by(cls='DataSource')
             if ds.nodes:
                 res['data_source'] = [x.name for x in ds.nodes]
@@ -815,7 +880,8 @@ class AppSession(ApplicationSession):
                 ds = q.get_data_qw().owned_by(cls='DataSource')
                 res['data_source'] = [x.name for x in ds.nodes]
 
-            subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData', 'MorphologyData'],as_type='nx').node
+            subdata = q.get_data(cls = ['NeurotransmitterData', 'GeneticData', 'MorphologyData'],
+                                 as_type = 'nx', edges = False, deepcopy = False).node
             ignore = ['name','uname','label','class', 'x', 'y', 'z', 'r', 'parent', 'identifier', 'sample', 'morph_type']
             key_map = {'Transmitters': 'transmitters', 'N': 'number'}#'transgenic_lines': 'Transgenic Lines'}
             for x in subdata.values():
