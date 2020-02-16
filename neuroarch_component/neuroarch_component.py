@@ -337,7 +337,7 @@ class query_processor():
            [{'object':...:,'action...'}]
         """
         assert 'object' in query and 'action' in query
-        assert 'class' in query['object'] or 'state' in query['object'] or 'memory' in query['object']
+        assert 'class' in query['object'] or 'state' in query['object'] or 'memory' in query['object'] or 'rid' in query['object']
         '''
         if 'class' in query['object']:
             # Retrieve Class
@@ -397,6 +397,15 @@ class query_processor():
                                                                           attrs=str(attrs))
                 query_str = "select from (select expand($a) let %s, $a = unionall(%s))" % \
                     (", ".join(q.values()), ", ".join(q.keys()) )
+                query_str = QueryString(query_str,'sql')
+                query_result = QueryWrapper(self.graph, query_str)
+            elif 'rid' in query['object']:
+                if isinstance(query['object']['rid'], list):
+                    query_str = "select from [{}]".format(','.join(query['object']['rid']))
+                elif isinstance(query['object']['rid'], str):
+                    query_str = "select from {}".format(query['object']['rid'])
+                else:
+                    raise ValueError('rid must be either a list of rids or str')
                 query_str = QueryString(query_str,'sql')
                 query_result = QueryWrapper(self.graph, query_str)
             else:
@@ -630,7 +639,7 @@ class AppSession(ApplicationSession):
         @inlineCallbacks
         def get_data_sub(q):
             res = q.get_as('nx', deepcopy = False).node.values()[0]
-            # qq = q.get_as('obj')[0][0]
+            orid = q.get_as('obj')[0][0]._id
             # ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
             # if len(ds):
             #     res['data_source'] = [x.name for x in ds]
@@ -643,11 +652,11 @@ class AppSession(ApplicationSession):
             #         res['data_source'] = ['Unknown']
             ds = q.owned_by(cls='DataSource')
             if ds.nodes:
-                res['data_source'] = [x.name for x in ds.nodes]
+                res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
             else:
                 ds = q.get_data_qw().owned_by(cls='DataSource')
                 if ds.nodes:
-                    res['data_source'] = [x.name for x in ds.nodes]
+                    res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
                 else:
                     res['data_source'] = ['Unknown']
 
@@ -658,6 +667,7 @@ class AppSession(ApplicationSession):
                 up_data = {(key_map[k] if k in key_map else k ):x[k] for k in x if k not in ignore}
                 res.update(up_data)
 
+            res['orid'] = orid
             res = {'summary': res}
             if 'FlyCircuit' in res['summary']['data_source']:
                 try:
@@ -702,6 +712,8 @@ class AppSession(ApplicationSession):
                 for neu_id, syn_id in ntos.items():
                     info = {'has_morph': 0, 'has_syn_morph': 0}
                     info['number'] = synapses.node[syn_id].get('N', 1)
+                    info['n_rid'] = neu_id
+                    info['s_rid'] = syn_id
                     if neu_id in post_map_l:
                         info['has_morph'] = 1
                         info['rid'] = post_map_l[neu_id]
@@ -732,6 +744,8 @@ class AppSession(ApplicationSession):
                 for neu_id, syn_id in ntos.items():
                     info = {'has_morph': 0, 'has_syn_morph': 0}
                     info['number'] = synapses.node[syn_id].get('N', 1)
+                    info['n_rid'] = neu_id
+                    info['s_rid'] = syn_id
                     if neu_id in pre_map_l:
                         info['has_morph'] = 1
                         info['rid'] = pre_map_l[neu_id]
@@ -873,16 +887,22 @@ class AppSession(ApplicationSession):
 
         def get_syn_data_sub(q):
             res = q.get_as('nx', deepcopy = False).node.values()[0]
+            synapse = q.get_as('obj')[0][0]
+            syn_id = synapse._id
+            res['orid'] = syn_id
             ds = q.owned_by(cls='DataSource')
             if ds.nodes:
-                res['data_source'] = [x.name for x in ds.nodes]
+                res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
             else:
                 ds = q.get_data_qw().owned_by(cls='DataSource')
-                res['data_source'] = [x.name for x in ds.nodes]
+                if ds.nodes:
+                    res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
+                else:
+                    res['data_source'] = ['Unknown']
 
             subdata = q.get_data(cls = ['NeurotransmitterData', 'GeneticData', 'MorphologyData'],
                                  as_type = 'nx', edges = False, deepcopy = False).node
-            ignore = ['name','uname','label','class', 'x', 'y', 'z', 'r', 'parent', 'identifier', 'sample', 'morph_type']
+            ignore = ['name','uname','label','class', 'x', 'y', 'z', 'r', 'parent', 'identifier', 'sample', 'morph_type', 'confidence']
             key_map = {'Transmitters': 'transmitters', 'N': 'number'}#'transgenic_lines': 'Transgenic Lines'}
             for x in subdata.values():
                 up_data = {(key_map[k] if k in key_map else k ):x[k] for k in x if k not in ignore}
@@ -895,7 +915,44 @@ class AppSession(ApplicationSession):
                 res['synapse_locations'] = Counter(res['region'])
                 del res['region']
 
-            res = {'data':{'summary': res}}
+            post_neuron = synapse.out('SendsTo')[0]
+            pre_neuron = synapse.in_('SendsTo')[0]
+
+            post_neuron_morph = [n for n in post_neuron.out('HasData') if isinstance(n, MorphologyData)]
+            pre_neuron_morph = [n for n in pre_neuron.out('HasData') if isinstance(n, MorphologyData)]
+
+            post_data = []
+            neu_id = post_neuron._id
+            post_neuron = QueryWrapper.from_rids(q._graph, neu_id).get_as('nx', edges=False, deepcopy=False)
+            info = {'has_morph': 0, 'has_syn_morph': 0}
+            info['number'] = getattr(synapse, 'N', 1)
+            info['n_rid'] = neu_id
+            if len(post_neuron_morph):
+                info['has_morph'] = 1
+                info['rid'] = post_neuron_morph[0]._id
+            info.update(post_neuron.node[neu_id])
+            post_data.append(info)
+
+            pre_data = []
+            neu_id = pre_neuron._id
+            pre_neuron = QueryWrapper.from_rids(q._graph, neu_id).get_as('nx', edges=False, deepcopy=False)
+            info = {'has_morph': 0, 'has_syn_morph': 0}
+            info['number'] = getattr(synapse, 'N', 1)
+            info['n_rid'] = neu_id
+            if len(pre_neuron_morph):
+                info['has_morph'] = 1
+                info['rid'] = pre_neuron_morph[0]._id
+            info.update(pre_neuron.node[neu_id])
+            pre_data.append(info)
+
+            res = {'data':{'summary': res,
+                           'connectivity':{
+                               'post': {
+                                   'details': post_data,
+                               }, 'pre': {
+                                   'details': pre_data,
+                               }}
+                   }}
             return res
 
 
