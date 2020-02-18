@@ -383,19 +383,19 @@ class query_processor():
                         # To prevent issues with unicode objects
                         if v and isinstance(v[0],basestring): v = [str(val) for val in v]
                     if len(v) == 1 and isinstance(v[0],(unicode,str)) and len(v[0])>=2 and str(v[0][:2]) == '/r':
-                        attrs.append("%s matches '%s'" % (str(k), str(v[0][2:])))
+                        attrs.append(""" %s matches "%s" """ % (str(k), str(v[0][2:])))
                     else:
-                        attrs.append("%s in %s" % (str(k), str(v)))
+                        attrs.append(""" %s in %s""" % (str(k), str(v)))
                 attrs = " and ".join(attrs)
                 if attrs: attrs = "where " + attrs
                 query['object']['class'] = _list_repr(query['object']['class'])
                 q = {}
                 for i, a in enumerate(query['object']['class']):
                     var = '$q'+str(i)
-                    q[var] = "{var} = (select from {cls} {attrs})".format(var=var,
+                    q[var] = """ {var} = (select from {cls} {attrs})""".format(var=var,
                                                                           cls=str(a),
                                                                           attrs=str(attrs))
-                query_str = "select from (select expand($a) let %s, $a = unionall(%s))" % \
+                query_str = """select from (select expand($a) let %s, $a = unionall(%s))""" % \
                     (", ".join(q.values()), ", ".join(q.keys()) )
                 query_str = QueryString(query_str,'sql')
                 query_result = QueryWrapper(self.graph, query_str)
@@ -403,7 +403,7 @@ class query_processor():
                 if isinstance(query['object']['rid'], list):
                     query_str = "select from [{}]".format(','.join(query['object']['rid']))
                 elif isinstance(query['object']['rid'], str):
-                    query_str = "select from {}".format(query['object']['rid'])
+                    query_str = """select from {}""".format(query['object']['rid'])
                 else:
                     raise ValueError('rid must be either a list of rids or str')
                 query_str = QueryString(query_str,'sql')
@@ -694,8 +694,8 @@ class AppSession(ApplicationSession):
             post_syn=q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
             pre_syn=q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
 
-
-            if len(post_syn.nodes) or len(pre_syn.nodes):
+            post_data = []
+            if len(post_syn.nodes):
                 post_syn_dict = {}
                 synapses = post_syn.get_as('nx', edges=False, deepcopy = False)
                 synapse_rids = ','.join(list(synapses.nodes()))
@@ -705,7 +705,7 @@ class AppSession(ApplicationSession):
                 neurons = QueryWrapper.from_rids(q._graph, *neuron_rids).get_as('nx', edges=False, deepcopy=False)
 
                 post_rids = ','.join(list(neurons.nodes()))
-                post_map_command = "select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'".format(post_rids,synapse_rids)
+                post_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(post_rids,synapse_rids)
                 post_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in q._graph.client.command(post_map_command)] if len(n)==2}
 
                 post_data = []
@@ -727,20 +727,20 @@ class AppSession(ApplicationSession):
                     post_data.append(info)
                 post_data = sorted(post_data, key=lambda x: x['number'])
 
+            pre_data = []
+            if len(pre_syn.nodes):
                 pre_syn_dict = {}
                 synapses = pre_syn.get_as('nx', edges=False, deepcopy = False)
                 synapse_rids = ','.join(list(synapses.nodes()))
-                n_rec=q._graph.client.command("SELECT $path from (traverse in('SendsTo') FROM [{}] maxdepth 1)".format(synapse_rids))
+                n_rec=q._graph.client.command("""SELECT $path from (traverse in('SendsTo') FROM [{}] maxdepth 1)""".format(synapse_rids))
                 ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
                 neuron_rids = list(set(ntos.keys()))
                 neurons = QueryWrapper.from_rids(q._graph, *neuron_rids).get_as('nx', edges=False, deepcopy=False)
 
                 pre_rids = ','.join(list(neurons.nodes()))
-                pre_map_command = "select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'".format(pre_rids, synapse_rids)
+                pre_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(pre_rids, synapse_rids)
                 pre_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in q._graph.client.command(pre_map_command)] if len(n)==2}
 
-
-                pre_data = []
                 for neu_id, syn_id in ntos.items():
                     info = {'has_morph': 0, 'has_syn_morph': 0}
                     info['number'] = synapses.node[syn_id].get('N', 1)
