@@ -67,6 +67,11 @@ ENV ORIENTDB_ROOT_PASSWORD root
 RUN git clone --single-branch -b hemibrain_vnc https://github.com/fruitflybrain/ffbo.neuroarch_component /neuroarch_component
 RUN git clone https://github.com/fruitflybrain/neuroarch /neuroarch
 
+# You can optionally download and install the database when building the image,
+# otherwise download the database dump using the link below or wget command further below
+# and map volume into the docker container.
+# https://drive.google.com/file/d/1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY/view?usp=sharing
+
 # Install database
 #WORKDIR /opt/orientdb/databases
 #RUN wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1lWCQPw5A6-HwH5oFsGFKDHw7S6JEsvqY" -O ffbo_db.tar.gz && rm -rf /tmp/cookies.txt && \
