@@ -1096,7 +1096,7 @@ class AppSession(ApplicationSession):
             # CALL server registration
             try:
                 # registered the procedure we would like to call
-                res = yield self.call(six.u( 'ffbo.server.register' ),details.session,'na','na_server_with_vfb_links')
+                res = yield self.call(six.u( 'ffbo.server.register' ),details.session, six.u('na'),six.u('na_server_with_vfb_links'))
                 self.log.info("register new server called with result: {result}",
                                                     result=res)
 
