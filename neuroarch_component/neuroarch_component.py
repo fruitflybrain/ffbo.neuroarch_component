@@ -136,7 +136,7 @@ class neuroarch_server(object):
                 return {}
             else:
                 output = QueryWrapper.from_objs(self.graph,[n])
-                return output.get_as()[0].to_json()
+                return output.get_as(edges = False)[0].to_json()
         except Exception as e:
             raise e
 
@@ -638,8 +638,9 @@ class AppSession(ApplicationSession):
 
         @inlineCallbacks
         def get_data_sub(q):
-            res = q.get_as('nx', deepcopy = False).node.values()[0]
-            orid = q.get_as('obj')[0][0]._id
+            res = q.get_as('nx', edges = False, deepcopy = False).node.values()[0]
+            n_obj = q.get_as('obj', edges = False)[0][0]
+            orid = n_obj._id
             # ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
             # if len(ds):
             #     res['data_source'] = [x.name for x in ds]
@@ -668,6 +669,10 @@ class AppSession(ApplicationSession):
                 res.update(up_data)
 
             res['orid'] = orid
+            try:
+                res['info'] = n_obj.info;
+            except:
+                res['info'] = {}
             res = {'summary': res}
             if 'FlyCircuit' in res['summary']['data_source']:
                 try:
@@ -886,8 +891,8 @@ class AppSession(ApplicationSession):
                 return False
 
         def get_syn_data_sub(q):
-            res = q.get_as('nx', deepcopy = False).node.values()[0]
-            synapse = q.get_as('obj')[0][0]
+            res = q.get_as('nx', edges = False, deepcopy = False).node.values()[0]
+            synapse = q.get_as('obj', edges = False)[0][0]
             syn_id = synapse._id
             res['orid'] = syn_id
             ds = q.owned_by(cls='DataSource')
