@@ -113,10 +113,8 @@ def chunks(data, SIZE=1000):
     for i in xrange(0, len(data), SIZE):
         yield {k:data[k] for k in islice(it, SIZE)}
 
-class neuroarch_server(object):
-    """ Methods to process neuroarch json tasks """
-
-    def __init__(self,database='/na_server',username='root',password='root', user=None):
+class graph_connection(object):
+    def __init__(self, database='/na_server', username='root', password='root'):
         try:
             self.graph = Graph(Config.from_url(database, username, password, initial_drop=False,serialization_type=OrientSerialization.Binary))
         except:
@@ -124,8 +122,16 @@ class neuroarch_server(object):
             self.graph = Graph(Config.from_url(database, username, password, initial_drop=False))
         self.graph.include(Node.registry)
         self.graph.include(Relationship.registry)
+
+class neuroarch_server(object):
+    """ Methods to process neuroarch json tasks """
+
+    def __init__(self, db, user = None, debug = False):
+        self.graph = db.graph
         self.user = user
-        self.query_processor = query_processor(self.graph)
+        self.debug = debug
+        print('DEBUG:', debug)
+        self.query_processor = query_processor(self.graph, debug = debug)
         self._busy = False
 
     def retrieve_neuron(self,nid):
@@ -135,7 +141,7 @@ class neuroarch_server(object):
             if n == None:
                 return {}
             else:
-                output = QueryWrapper.from_objs(self.graph,[n])
+                output = QueryWrapper.from_objs(self.graph,[n], debug = self.debug)
                 return output.get_as(edges = False)[0].to_json()
         except Exception as e:
             raise e
@@ -201,6 +207,8 @@ class neuroarch_server(object):
                         print e
                     if not task['verb'] == 'add':
                         if task['format'] == 'morphology':
+                            print('keep')
+                            print(output)
                             output = output.get_data_rids(cls='MorphologyData')
                         else:
                             output = output._records_to_list(output.nodes)
@@ -296,9 +304,10 @@ class neuroarch_server(object):
 
 class query_processor():
 
-    def __init__(self, graph):
+    def __init__(self, graph, debug = False):
         self.class_list = {}
         self.graph = graph
+        self.debug = debug
         self.load_class_list()
 
     def load_class_list(self):
@@ -398,16 +407,14 @@ class query_processor():
                 query_str = """select from (select expand($a) let %s, $a = unionall(%s))""" % \
                     (", ".join(q.values()), ", ".join(q.keys()) )
                 query_str = QueryString(query_str,'sql')
-                query_result = QueryWrapper(self.graph, query_str)
+                query_result = QueryWrapper(self.graph, query_str, debug = self.debug)
             elif 'rid' in query['object']:
                 if isinstance(query['object']['rid'], list):
-                    query_str = "select from [{}]".format(','.join(query['object']['rid']))
+                    query_result = QueryWrapper.from_rids(self.graph, *query['object']['rid'])
                 elif isinstance(query['object']['rid'], str):
-                    query_str = """select from {}""".format(query['object']['rid'])
+                    query_result = QueryWrapper.from_rids(self.graph, query['object']['rid'])
                 else:
                     raise ValueError('rid must be either a list of rids or str')
-                query_str = QueryString(query_str,'sql')
-                query_result = QueryWrapper(self.graph, query_str)
             else:
                 method_call = query['action']['method']
 
@@ -456,7 +463,7 @@ class query_processor():
 
         # convert result to a query wrapper to save
         if type(query_result) is not QueryWrapper:
-            output = QueryWrapper.from_objs(self.graph,query_result.all())
+            output = QueryWrapper.from_objs(self.graph,query_result.all(), debug = self.debug)
         else:
             output = query_result
 
@@ -464,19 +471,20 @@ class query_processor():
 
 
 class user_list():
-    def __init__(self, state_limit=10):
+    def __init__(self, state_limit=10, debug = False):
         self.list = {}
         self.state_limit = state_limit
+        self.debug = debug
+        print('DEBUG1:', debug)
         pass
 
-    def user(self,user_id, database='/na_server',username='root',password='root'):
+    def user(self, user_id, db, debug = False):
+        print(user_id)
+        print(user_list)
         if user_id not in self.list:
             st = state.State(user_id)
             self.list[user_id] = {'state': st,
-                                  'server': neuroarch_server(database = database,
-                                                             username = username,
-                                                             password = password,
-                                                             user=st)}
+                                  'server': neuroarch_server(db, user = st, debug = self.debug)}
         return self.list[user_id]
 
     def cleanup(self):
@@ -534,10 +542,15 @@ class AppSession(ApplicationSession):
 
     @inlineCallbacks
     def onJoin(self, details):
+        self.db_connection = graph_connection(
+                                database=self.config.extra['database'],
+                                username = self.config.extra['username'],
+                                password = self.config.extra['password'])
+        self.na_debug = self.config.extra['debug']
         self._max_concurrency = 10
         self._current_concurrency = 0
         self._invocations_served = 0
-        self.user_list = user_list()
+        self.user_list = user_list(debug = self.na_debug)
 
         arg_kws = ['color']
 
@@ -571,9 +584,7 @@ class AppSession(ApplicationSession):
 
             server = self.user_list.user(
                                 user_id,
-                                database=self.config.extra['database'],
-                                username = self.config.extra['username'],
-                                password = self.config.extra['password'])['server']
+                                self.db_connection)['server']
             (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
 
             uri = 'ffbo.ui.receive_msg.%s' % user_id
@@ -700,6 +711,8 @@ class AppSession(ApplicationSession):
             pre_syn=q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
 
             post_data = []
+            if self.na_debug:
+                start = time.time()
             if len(post_syn.nodes):
                 post_syn_dict = {}
                 synapses = post_syn.get_as('nx', edges=False, deepcopy = False)
@@ -707,7 +720,7 @@ class AppSession(ApplicationSession):
                 n_rec=q._graph.client.command("SELECT $path from (traverse out('SendsTo') FROM [{}] maxdepth 1)".format(synapse_rids))
                 ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
                 neuron_rids = list(set(ntos.keys()))
-                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids).get_as('nx', edges=False, deepcopy=False)
+                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
 
                 post_rids = ','.join(list(neurons.nodes()))
                 post_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(post_rids,synapse_rids)
@@ -740,7 +753,7 @@ class AppSession(ApplicationSession):
                 n_rec=q._graph.client.command("""SELECT $path from (traverse in('SendsTo') FROM [{}] maxdepth 1)""".format(synapse_rids))
                 ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
                 neuron_rids = list(set(ntos.keys()))
-                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids).get_as('nx', edges=False, deepcopy=False)
+                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
 
                 pre_rids = ','.join(list(neurons.nodes()))
                 pre_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(pre_rids, synapse_rids)
@@ -882,6 +895,8 @@ class AppSession(ApplicationSession):
                         }
                     }
                 })
+            if self.na_debug:
+                print("Finished 'get_data connectivity' in", time.time()-start)
             returnValue({'data':res})
 
         def is_rid(rid):
@@ -928,7 +943,7 @@ class AppSession(ApplicationSession):
 
             post_data = []
             neu_id = post_neuron._id
-            post_neuron = QueryWrapper.from_rids(q._graph, neu_id).get_as('nx', edges=False, deepcopy=False)
+            post_neuron = QueryWrapper.from_rids(q._graph, neu_id, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
             info = {'has_morph': 0, 'has_syn_morph': 0}
             info['number'] = getattr(synapse, 'N', 1)
             info['n_rid'] = neu_id
@@ -940,7 +955,7 @@ class AppSession(ApplicationSession):
 
             pre_data = []
             neu_id = pre_neuron._id
-            pre_neuron = QueryWrapper.from_rids(q._graph, neu_id).get_as('nx', edges=False, deepcopy=False)
+            pre_neuron = QueryWrapper.from_rids(q._graph, neu_id, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
             info = {'has_morph': 0, 'has_syn_morph': 0}
             info['number'] = getattr(synapse, 'N', 1)
             info['n_rid'] = neu_id
@@ -974,14 +989,12 @@ class AppSession(ApplicationSession):
             self.log.info("na_get_data() called with task: {task}",task=task)
             server = self.user_list.user(
                             user_id,
-                            database=self.config.extra['database'],
-                            username = self.config.extra['username'],
-                            password = self.config.extra['password'])['server']
+                            self.db_connection)['server']
             try:
                 if not is_rid(task['id']):
                     returnValue({})
                 elem = server.graph.get_element(task['id'])
-                q = QueryWrapper.from_objs(server.graph,[elem])
+                q = QueryWrapper.from_objs(server.graph,[elem], self.na_debug)
                 callback = get_data_sub if elem.element_type == 'Neuron' else get_syn_data_sub
                 if not (elem.element_type == 'Neuron' or elem.element_type == 'Synapse' or elem.element_type=='InferredSynapse'):
                     qn = q.gen_traversal_in(['HasData','Neuron'],min_depth=1)
@@ -1026,9 +1039,7 @@ class AppSession(ApplicationSession):
 
             server = self.user_list.user(
                         user_id,
-                        database=self.config.extra['database'],
-                        username = self.config.extra['username'],
-                        password = self.config.extra['password'])['server']
+                        self.db_connection)['server']
             (output,succ) = server.receive_task({"command":{"retrieve":{"state":0}},"format":"qw"})
             if not succ:
                 return {"info":{"error":
@@ -1067,10 +1078,8 @@ class AppSession(ApplicationSession):
 
             server = self.user_list.user(
                             user_id,
-                            database=self.config.extra['database'],
-                            username = self.config.extra['username'],
-                            password = self.config.extra['password'])['server']
-            tagged_result = QueryWrapper.from_tag(graph=server.graph, tag=task['tag'])
+                            self.db_connection)['server']
+            tagged_result = QueryWrapper.from_tag(graph=server.graph, tag=task['tag'], debug = self.na_debug)
             if tagged_result and tagged_result['metadata'] and tagged_result['metadata']!='{}':
                 server.user.append(tagged_result['qw'])
                 return {'data':tagged_result['metadata'],
@@ -1176,7 +1185,7 @@ if __name__ == '__main__':
 
    # any extra info we want to forward to our ClientSession (in self.config.extra)
     extra = {'auth': True, 'database': args.db, 'username': args.user,
-             'password': pw}
+             'password': pw, 'debug': args.debug}
 
     if args.ssl:
         st_cert=open(args.ca_cert_file, 'rt').read()
