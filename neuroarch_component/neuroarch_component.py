@@ -664,13 +664,13 @@ class AppSession(ApplicationSession):
             #         res['data_source'] = ['Unknown']
             ds = q.owned_by(cls='DataSource')
             if ds.nodes:
-                res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
+                res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
             else:
                 ds = q.get_data_qw().owned_by(cls='DataSource')
                 if ds.nodes:
-                    res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
+                    res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
                 else:
-                    res['data_source'] = ['Unknown']
+                    res['data_source'] = {'Unknown': ''}
 
             subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx',edges=False,deepcopy=False).nodes
             ignore = ['name','uname','label','class']
@@ -912,13 +912,13 @@ class AppSession(ApplicationSession):
             res['orid'] = syn_id
             ds = q.owned_by(cls='DataSource')
             if ds.nodes:
-                res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
+                res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
             else:
                 ds = q.get_data_qw().owned_by(cls='DataSource')
                 if ds.nodes:
-                    res['data_source'] = ['{} v{}'.format(x.name, getattr(x, 'version', '')) for x in ds.nodes]
+                    res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
                 else:
-                    res['data_source'] = ['Unknown']
+                    res['data_source'] = {'Unknown': ''}
 
             subdata = q.get_data(cls = ['NeurotransmitterData', 'GeneticData', 'MorphologyData'],
                                  as_type = 'nx', edges = False, deepcopy = False).nodes
