@@ -96,17 +96,31 @@ import uuid
 from twisted.internet import reactor, threads
 from itertools import islice
 
-
-def byteify(input):
+def byteify_py2(input):
     if isinstance(input, dict):
         return {byteify(key): byteify(value)
                                 for key, value in input.items()}
     elif isinstance(input, list):
                 return [byteify(element) for element in input]
-    #elif isinstance(input, unicode):
-    #            return input.encode('utf-8')
+    elif isinstance(input, unicode):
+                return input.encode('utf-8')
     else:
         return input
+
+def byteify_py3(input):
+    if isinstance(input, dict):
+        return {byteify(key): byteify(value)
+                                for key, value in input.items()}
+    elif isinstance(input, list):
+                return [byteify(element) for element in input]
+    else:
+        return input
+
+def byteify(input):
+    if six.PY2:
+        return byteify_py2(input)
+    else:
+        return byteify_py3(input)
 
 def chunks(data, SIZE=1000):
     it = iter(data)
