@@ -68,7 +68,10 @@ if "ip" in config["SERVER"]:
     ip = config["SERVER"]["ip"]
 else:
     ip = "localhost"
-port = config["NLP"]["expose-port"]
+if ip in ["localhost", "127.0.0.1"]:
+    port = config["NLP"]["port"]
+else:
+    port = config["NLP"]["expose-port"]
 url =  "{}://{}:{}/ws".format(websockets, ip, port)
 realm = config["SERVER"]["realm"]
 authentication = eval(config["AUTH"]["authentication"])
