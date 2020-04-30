@@ -5,7 +5,7 @@ import time
 # memory management
 # 1) have a maximum number of states per list
 # 2) clear a State that have not been accessed in x hours
-# 3) 
+# 3)
 
 class State(object):
     def __init__(self,name,limit=10):
@@ -23,7 +23,7 @@ class State(object):
         if int(time.time()) - self.last_accessed > self.clean_up_time: # One minute
             self.clear()
             self.force_empty_garbage()
-            print "memory managed"
+            print("memory managed")
             return True
         else:
             return False
@@ -73,7 +73,7 @@ class State(object):
             restart
             undo """
         assert len(action.keys()) == 1
-        command = action.keys()[0]
+        command = list(action.keys())[0]
         if command == 'restart':
             self.clear()
         elif command == 'undo':
@@ -89,6 +89,3 @@ class State(object):
         else:
             self.messages.append("action failed : " + str(action))
         return self.retrieve()
-
-
-

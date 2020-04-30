@@ -100,17 +100,17 @@ from itertools import islice
 def byteify(input):
     if isinstance(input, dict):
         return {byteify(key): byteify(value)
-                                for key, value in input.iteritems()}
+                                for key, value in input.items()}
     elif isinstance(input, list):
                 return [byteify(element) for element in input]
-    elif isinstance(input, unicode):
-                return input.encode('utf-8')
+    #elif isinstance(input, unicode):
+    #            return input.encode('utf-8')
     else:
         return input
 
 def chunks(data, SIZE=1000):
     it = iter(data)
-    for i in xrange(0, len(data), SIZE):
+    for i in range(0, len(data), SIZE):
         yield {k:data[k] for k in islice(it, SIZE)}
 
 class graph_connection(object):
@@ -156,7 +156,7 @@ class neuroarch_server(object):
             self.query_processor.process(task['query'],self.user)
             return True
         except Exception as e:
-            print e
+            print(e)
             return False
 
     @staticmethod
@@ -204,7 +204,7 @@ class neuroarch_server(object):
                     try:
                         output = self.process_verb(output, user, task['verb'])
                     except Exception as e:
-                        print e
+                        print(e)
                     if not task['verb'] == 'add':
                         if task['format'] == 'morphology':
                             print('keep')
@@ -290,7 +290,7 @@ class neuroarch_server(object):
                         if output[0]==None:
                             succ=False
                     except Exception as e:
-                        print e
+                        print(e)
                         succ = False
                     self._busy = False
                     if 'temp' in task and task['temp'] and len(user.state)>=2:
@@ -299,7 +299,7 @@ class neuroarch_server(object):
                 self._busy = False
                 return succ
         except Exception as e:
-            print e
+            print(e)
             self._busy = False
 
 class query_processor():
@@ -318,9 +318,9 @@ class query_processor():
                 plural = eval(k + ".registry_plural")
                 self.class_list[k]=eval("self.graph." + plural)
             except:
-                print "Warning:Class %s left out of class list" % k
+                print("Warning:Class %s left out of class list" % k)
                 e = sys.exc_info()[0]
-                print e
+                print(e)
         #print self.class_list
 
     def process(self,query_list,user):
@@ -357,20 +357,20 @@ class query_processor():
         if 'state' in query['object']:
             state_num = query['object']['state']
 
-            if type(state_num) is long:
+            if isinstance(state_num, int):
                 state_num = int(state_num)
 
-            assert type(state_num) in [int,long]
+            assert isinstance(state_num, int)
             na_object = user.retrieve(index = state_num)
 
         elif 'memory' in query['object']:
             assert task_memory is not []
             memory_index = query['object']['memory']
 
-            if type(memory_index) is long:
+            if isinstance(memory_index, int):
                 memory_index = int(memory_index)
 
-            assert type(memory_index) is int
+            assert isinstance(memory_index, int)
             assert len(task_memory) > memory_index
             na_object = task_memory[-1-memory_index]
 
@@ -379,19 +379,19 @@ class query_processor():
             if 'class' in query['object']:
                 method_call = query['action']['method']
                 assert len(method_call.keys()) == 1
-                method_name = method_call.keys()[0]
+                method_name = list(method_call.keys())[0]
 
                 method_args = method_call[method_name]
                 columns = ""
                 attrs = []
-                for k, v in method_args.iteritems():
+                for k, v in method_args.items():
                     if not(isinstance(v, list)):
-                        if isinstance(v, (basestring, numbers.Number)):
+                        if isinstance(v, (str, numbers.Number)):
                             v = [str(v)]
                     else:
                         # To prevent issues with unicode objects
-                        if v and isinstance(v[0],basestring): v = [str(val) for val in v]
-                    if len(v) == 1 and isinstance(v[0],(unicode,str)) and len(v[0])>=2 and str(v[0][:2]) == '/r':
+                        if v and isinstance(v[0],str): v = [str(val) for val in v]
+                    if len(v) == 1 and isinstance(v[0],str) and len(v[0])>=2 and str(v[0][:2]) == '/r':
                         attrs.append(""" %s matches "%s" """ % (str(k), str(v[0][2:])))
                     else:
                         attrs.append(""" %s in %s""" % (str(k), str(v)))
@@ -405,7 +405,7 @@ class query_processor():
                                                                           cls=str(a),
                                                                           attrs=str(attrs))
                 query_str = """select from (select expand($a) let %s, $a = unionall(%s))""" % \
-                    (", ".join(q.values()), ", ".join(q.keys()) )
+                    (", ".join(list(q.values())), ", ".join(list(q.keys())) )
                 query_str = QueryString(query_str,'sql')
                 query_result = QueryWrapper(self.graph, query_str, debug = self.debug)
             elif 'rid' in query['object']:
@@ -420,7 +420,7 @@ class query_processor():
 
 
                 assert len(method_call.keys()) == 1
-                method_name = method_call.keys()[0]
+                method_name = list(method_call.keys())[0]
                 # check method is valid
                 assert method_name in dir(type(na_object))
                 # Retrieve arguments
@@ -437,22 +437,22 @@ class query_processor():
         elif 'op' in query['action']:
             method_call = query['action']['op']
             assert len(method_call.keys()) == 1
-            method_name = method_call.keys()[0]
+            method_name = list(method_call.keys())[0]
             # WIP: Check which operators are supported
             # What if we want to be a op between two past states!
             # retieve past external state or internal memory state
             if 'state' in method_call[method_name]:
                 state_num = method_call[method_name]['state']
-                assert type(state_num) in [int,long]
+                assert isinstance(state_num, int)
                 past_object = user.retrieve(index = state_num)
             elif 'memory' in method_call[method_name]:
                 assert task_memory is not []
                 memory_index = method_call[method_name]['memory']
 
-                if type(memory_index) is long:
+                if isinstance(memory_index, int):
                     memory_index = int(memory_index)
 
-                assert type(memory_index) is int
+                assert isinstance(memory_index, int)
                 assert len(task_memory) > memory_index
                 past_object = task_memory[-1-memory_index]
 
@@ -600,14 +600,14 @@ class AppSession(ApplicationSession):
                     yield self.call(uri, {'info':{'error':
                                                   'Error executing query on NeuroArch'}})
             except Exception as e:
-                print e
+                print(e)
 
             try:
                 if(task['format'] == 'morphology' and (not 'verb' in task or task['verb'] == 'show')):
                     yield self.call(cmd_uri,
                                     {'commands': {'reset':''}})
             except Exception as e:
-                print e
+                print(e)
 
             if('verb' in task and task['verb'] not in ['add','show']):
                 try:
@@ -645,11 +645,11 @@ class AppSession(ApplicationSession):
                         returnValue({'info': {'success':'Finished fetching all results from database'},
                                      'data': res})
         uri = six.u( 'ffbo.na.query.%s' % str(details.session) )
-        yield self.register(na_query, uri, RegisterOptions(details_arg='details',concurrency=self._max_concurrency/2))
+        yield self.register(na_query, uri, RegisterOptions(details_arg='details',concurrency=self._max_concurrency//2))
 
         @inlineCallbacks
         def get_data_sub(q):
-            res = q.get_as('nx', edges = False, deepcopy = False).node.values()[0]
+            res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
             n_obj = q.get_as('obj', edges = False)[0][0]
             orid = n_obj._id
             # ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
@@ -672,7 +672,7 @@ class AppSession(ApplicationSession):
                 else:
                     res['data_source'] = ['Unknown']
 
-            subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx',edges=False,deepcopy=False).node
+            subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx',edges=False,deepcopy=False).nodes
             ignore = ['name','uname','label','class']
             key_map = {'Transmitters': 'transmitters'}#'transgenic_lines': 'Transgenic Lines'}
             for x in subdata.values():
@@ -692,7 +692,7 @@ class AppSession(ApplicationSession):
                 except:
                     pass
 
-            arborization_data = q.get_data(cls='ArborizationData', as_type='nx',edges=False,deepcopy=False).node
+            arborization_data = q.get_data(cls='ArborizationData', as_type='nx',edges=False,deepcopy=False).nodes
             ignore = ['name','uname','label','class']
             up_data = {}
 
@@ -729,7 +729,7 @@ class AppSession(ApplicationSession):
                 post_data = []
                 for neu_id, syn_id in ntos.items():
                     info = {'has_morph': 0, 'has_syn_morph': 0}
-                    info['number'] = synapses.node[syn_id].get('N', 1)
+                    info['number'] = synapses.nodes[syn_id].get('N', 1)
                     info['n_rid'] = neu_id
                     info['s_rid'] = syn_id
                     if neu_id in post_map_l:
@@ -738,10 +738,10 @@ class AppSession(ApplicationSession):
                     if syn_id in post_map_l:
                         info['has_syn_morph'] = 1
                         info['syn_rid'] = post_map_l[syn_id]
-                        if 'uname' in synapses.node[syn_id]:
-                            info['syn_uname'] = synapses.node[syn_id]['uname']
-                    info['inferred'] = (synapses.node[syn_id]['class'] == 'InferredSynapse')
-                    info.update(neurons.node[neu_id])
+                        if 'uname' in synapses.nodes[syn_id]:
+                            info['syn_uname'] = synapses.nodes[syn_id]['uname']
+                    info['inferred'] = (synapses.nodes[syn_id]['class'] == 'InferredSynapse')
+                    info.update(neurons.nodes[neu_id])
                     post_data.append(info)
                 post_data = sorted(post_data, key=lambda x: x['number'])
 
@@ -761,7 +761,7 @@ class AppSession(ApplicationSession):
 
                 for neu_id, syn_id in ntos.items():
                     info = {'has_morph': 0, 'has_syn_morph': 0}
-                    info['number'] = synapses.node[syn_id].get('N', 1)
+                    info['number'] = synapses.nodes[syn_id].get('N', 1)
                     info['n_rid'] = neu_id
                     info['s_rid'] = syn_id
                     if neu_id in pre_map_l:
@@ -770,10 +770,10 @@ class AppSession(ApplicationSession):
                     if syn_id in pre_map_l:
                         info['has_syn_morph'] = 1
                         info['syn_rid'] = pre_map_l[syn_id]
-                        if 'uname' in synapses.node[syn_id]:
-                            info['syn_uname'] = synapses.node[syn_id]['uname']
-                    info['inferred'] = (synapses.node[syn_id]['class'] == 'InferredSynapse')
-                    info.update(neurons.node[neu_id])
+                        if 'uname' in synapses.nodes[syn_id]:
+                            info['syn_uname'] = synapses.nodes[syn_id]['uname']
+                    info['inferred'] = (synapses.nodes[syn_id]['class'] == 'InferredSynapse')
+                    info.update(neurons.nodes[neu_id])
                     pre_data.append(info)
                 pre_data = sorted(pre_data, key=lambda x: x['number'])
 
@@ -866,7 +866,7 @@ class AppSession(ApplicationSession):
                         pass
                     if cls in pre_sum: pre_sum[cls] += x['number']
                     else: pre_sum[cls] = x['number']
-                pre_N =  np.sum(pre_sum.values())
+                pre_N =  np.sum(list(pre_sum.values()))
                 pre_sum = {k: 100*float(v)/pre_N for (k,v) in pre_sum.items()}
 
                 # Summary PostSyn Information
@@ -875,7 +875,7 @@ class AppSession(ApplicationSession):
                     cls = x['name'].split('-')[0]
                     if cls in post_sum: post_sum[cls] += x['number']
                     else: post_sum[cls] = x['number']
-                post_N =  np.sum(post_sum.values())
+                post_N =  np.sum(list(post_sum.values()))
                 post_sum = {k: 100*float(v)/post_N for (k,v) in post_sum.items()}
 
                 res.update({
@@ -883,13 +883,13 @@ class AppSession(ApplicationSession):
                         'post': {
                             'details': post_data,
                             'summary': {
-                                'number': post_N,
+                                'number': int(post_N),
                                 'profile': post_sum
                             }
                         }, 'pre': {
                             'details': pre_data,
                             'summary': {
-                                'number': pre_N,
+                                'number': int(pre_N),
                                 'profile': pre_sum
                             }
                         }
@@ -900,13 +900,13 @@ class AppSession(ApplicationSession):
             returnValue({'data':res})
 
         def is_rid(rid):
-            if isinstance(rid, basestring) and re.search('^\#\d+\:\d+$', rid):
+            if isinstance(rid, str) and re.search('^\#\d+\:\d+$', rid):
                 return True
             else:
                 return False
 
         def get_syn_data_sub(q):
-            res = q.get_as('nx', edges = False, deepcopy = False).node.values()[0]
+            res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
             synapse = q.get_as('obj', edges = False)[0][0]
             syn_id = synapse._id
             res['orid'] = syn_id
@@ -921,7 +921,7 @@ class AppSession(ApplicationSession):
                     res['data_source'] = ['Unknown']
 
             subdata = q.get_data(cls = ['NeurotransmitterData', 'GeneticData', 'MorphologyData'],
-                                 as_type = 'nx', edges = False, deepcopy = False).node
+                                 as_type = 'nx', edges = False, deepcopy = False).nodes
             ignore = ['name','uname','label','class', 'x', 'y', 'z', 'r', 'parent', 'identifier', 'sample', 'morph_type', 'confidence']
             key_map = {'Transmitters': 'transmitters', 'N': 'number'}#'transgenic_lines': 'Transgenic Lines'}
             for x in subdata.values():
@@ -950,7 +950,7 @@ class AppSession(ApplicationSession):
             if len(post_neuron_morph):
                 info['has_morph'] = 1
                 info['rid'] = post_neuron_morph[0]._id
-            info.update(post_neuron.node[neu_id])
+            info.update(post_neuron.nodes[neu_id])
             post_data.append(info)
 
             pre_data = []
@@ -962,7 +962,7 @@ class AppSession(ApplicationSession):
             if len(pre_neuron_morph):
                 info['has_morph'] = 1
                 info['rid'] = pre_neuron_morph[0]._id
-            info.update(pre_neuron.node[neu_id])
+            info.update(pre_neuron.nodes[neu_id])
             pre_data.append(info)
 
             res = {'data':{'summary': res,
@@ -1006,7 +1006,7 @@ class AppSession(ApplicationSession):
                 #res = yield threads.deferToThread(get_data_sub, q)
                 res = yield callback(q)
             except Exception as e:
-                print e
+                print(e)
                 self.log.failure("Error Retrieveing Data")
                 res = {}
             returnValue(res)
@@ -1095,12 +1095,12 @@ class AppSession(ApplicationSession):
         def retrieve_neuron(nid):
             self.log.info("retrieve_neuron() called with neuron id: {nid} ", nid = nid)
             res = server.retrieve_neuron(nid)
-            print "retrieve neuron result: " + str(res)
+            print("retrieve neuron result: " + str(res))
             return res
 
         uri = six.u( 'ffbo.na.retrieve_neuron.%s' % str(details.session) )
-        yield self.register(retrieve_neuron, uri,RegisterOptions(concurrency=self._max_concurrency))
-        print "registered %s" % uri
+        yield self.register(retrieve_neuron, uri,RegisterOptions(concurrency=self._max_concurrency//2))
+        print("registered %s" % uri)
 
 
         # Listen for ffbo.processor.connected
