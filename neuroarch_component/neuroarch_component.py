@@ -225,8 +225,6 @@ class neuroarch_server(object):
                         print(e)
                     if not task['verb'] == 'add':
                         if task['format'] == 'morphology':
-                            print('keep')
-                            print(output)
                             output = output.get_data_rids(cls='MorphologyData')
                         else:
                             output = output._records_to_list(output.nodes)
@@ -493,12 +491,9 @@ class user_list():
         self.list = {}
         self.state_limit = state_limit
         self.debug = debug
-        print('DEBUG1:', debug)
         pass
 
     def user(self, user_id, db, debug = False):
-        print(user_id)
-        print(user_list)
         if user_id not in self.list:
             st = state.State(user_id)
             self.list[user_id] = {'state': st,
