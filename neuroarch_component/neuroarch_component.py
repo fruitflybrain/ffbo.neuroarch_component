@@ -560,6 +560,8 @@ class AppSession(ApplicationSession):
 
     @inlineCallbacks
     def onJoin(self, details):
+        self.server_config = {six.u('name'): six.u(self.config.extra['name']),
+                              six.u('dataset'): six.u(self.config.extra['dataset'])}
         self.db_connection = graph_connection(
                                 database=self.config.extra['database'],
                                 username = self.config.extra['username'],
@@ -1128,7 +1130,7 @@ class AppSession(ApplicationSession):
             # CALL server registration
             try:
                 # registered the procedure we would like to call
-                res = yield self.call(six.u( 'ffbo.server.register' ),details.session, six.u('na'),six.u('na_server_hemibrain'))
+                res = yield self.call(six.u( 'ffbo.server.register' ),details.session, six.u('na'),self.server_config)
                 self.log.info("register new server called with result: {result}",
                                                     result=res)
 
@@ -1296,6 +1298,10 @@ if __name__ == '__main__':
                         help='User name in orientdb database.')
     parser.add_argument('--password', dest='password', action='store_true',
                         help='Allow password prompt for authenticate database access.')
+    parser.add_argument('--name', dest='name', type=six.text_type, default=None,
+                        help='name of server, default to the same database name')
+    parser.add_argument('--dataset', dest='dataset', type=six.text_type, default=None,
+                        help='name of dataset, default to the same database name')
     parser.set_defaults(ssl=ssl)
     parser.set_defaults(debug=debug)
 
@@ -1312,9 +1318,17 @@ if __name__ == '__main__':
     else:
         txaio.start_logging(level='info')
 
-   # any extra info we want to forward to our ClientSession (in self.config.extra)
+    if args.dataset is None:
+        dataset = args.database
+    else:
+        dataset = args.dataset
+    if args.name is None:
+        name = args.database
+    else:
+        name = args.name
+    # any extra info we want to forward to our ClientSession (in self.config.extra)
     extra = {'auth': True, 'database': args.db, 'username': args.user,
-             'password': pw, 'debug': args.debug}
+             'password': pw, 'debug': args.debug, 'dataset': dataset, 'name': name}
 
     if args.ssl:
         st_cert=open(args.ca_cert_file, 'rt').read()
