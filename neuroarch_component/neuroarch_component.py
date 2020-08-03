@@ -1018,8 +1018,10 @@ class AppSession(ApplicationSession):
                 callback = get_data_sub if elem.element_type == 'Neuron' else get_syn_data_sub
                 if not (elem.element_type == 'Neuron' or elem.element_type == 'Synapse' or elem.element_type=='InferredSynapse'):
                     qn = q.gen_traversal_in(['HasData','Neuron'],min_depth=1)
-                    if not qn:
+                    if not qn.nodes:
                         q = q.gen_traversal_in(['HasData',['Synapse', 'InferredSynapse']],min_depth=1)
+                        if not q.nodes:
+                            raise ValueError('Did not find the Synapse node')
                     else:
                         q = qn
                         callback = get_data_sub
