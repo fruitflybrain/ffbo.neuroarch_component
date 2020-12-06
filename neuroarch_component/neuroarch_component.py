@@ -132,12 +132,17 @@ def chunks(data, SIZE=1000):
         yield {k:data[k] for k in islice(it, SIZE)}
 
 class graph_connection(object):
-    def __init__(self, database='/na_server', username='root', password='root'):
+    def __init__(self, database='na_server', username='root', password='root'):
         try:
-            self.graph = Graph(Config.from_url(database, username, password, initial_drop=False,serialization_type=OrientSerialization.Binary))
+            self.graph = Graph(Config('localhost', 2424,
+                                      username, password, database, 'plocal',
+                                      initial_drop=False,
+                                      serialization_type=OrientSerialization.Binary))
         except:
             #print "WARNING: Serialisation flag ignored"
-            self.graph = Graph(Config.from_url(database, username, password, initial_drop=False))
+            self.graph = Graph(Config('localhost', 2424,
+                                      username, password, database, 'plocal',
+                                      initial_drop=False))
         self.graph.include(Node.registry)
         self.graph.include(Relationship.registry)
 
@@ -1294,7 +1299,7 @@ if __name__ == '__main__':
                         default=intermediate_cert_file,
                         help='Intermediate PEM certificate file (defaults to value from config.ini).')
     parser.add_argument('--no-ssl', dest='ssl', action='store_false')
-    parser.add_argument('--database', dest='db', type=six.text_type, default='/na_server',
+    parser.add_argument('--database', dest='db', type=six.text_type, default='na_server',
                         help='Orientdb database folder name.')
     parser.add_argument('--username', dest='user', type=six.text_type, default='root',
                         help='User name in orientdb database.')
