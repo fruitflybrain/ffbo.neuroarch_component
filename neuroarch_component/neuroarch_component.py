@@ -1,43 +1,42 @@
+
 import sys
 import re
 import pickle
-
+import os
+import argparse
+from collections import Counter
+import time
+import txaio
 from math import isnan
+from configparser import ConfigParser
+import uuid
+from itertools import islice
 
+import six
+import numpy as np
+import simplejson as json
 from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.logger import Logger
 
+import autobahn
 from autobahn.twisted.util import sleep
 from autobahn.twisted.wamp import ApplicationSession, ApplicationRunner
+from twisted.internet import reactor, threads
 from autobahn.wamp.exception import ApplicationError
 from autobahn.wamp.types import RegisterOptions
+from autobahn.wamp import auth
 from autobahn.websocket.protocol import WebSocketClientFactory
 from operator import itemgetter
 
-import os
-import argparse
-import six
-import txaio
-
-import time
-
-# Neuroarch Imports
-import argparse
-
-import numpy as np
-import simplejson as json
-
 from pyorient.ogm import Graph, Config
 import pyorient.ogm.graph
+from pyorient.serializations import OrientSerialization
 
-import numpy as np
+from neuroarch.models import *
+from neuroarch.query import QueryWrapper, QueryString, _list_repr
 
-import time
-
-from collections import Counter
-
-
-from configparser import ConfigParser
+# User access
+import state
 
 # Grab configuration from file
 root = os.path.expanduser("/")
@@ -84,21 +83,6 @@ intermediate_cert_file = config["AUTH"]["intermediate_cert_file"]
 setattr(pyorient.ogm.graph, 'orientdb_version',
         pyorient.ogm.graph.ServerVersion)
 
-
-from neuroarch.models import *
-from neuroarch.query import QueryWrapper, QueryString, _list_repr
-
-from autobahn.wamp import auth
-
-# User access
-import state
-
-from pyorient.serializations import OrientSerialization
-
-import uuid
-
-from twisted.internet import reactor, threads
-from itertools import islice
 
 def byteify_py2(input):
     if isinstance(input, dict):
@@ -675,7 +659,7 @@ class AppSession(ApplicationSession):
         @inlineCallbacks
         def get_data_sub(q):
             res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-            n_obj = q.get_as('obj', edges = False)[0][0]
+            n_obj = q.nodes_as_objs[0]
             orid = n_obj._id
             # ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
             # if len(ds):
@@ -932,7 +916,7 @@ class AppSession(ApplicationSession):
 
         def get_syn_data_sub(q):
             res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-            synapse = q.get_as('obj', edges = False)[0][0]
+            synapse = q.nodes_as_objs[0]
             syn_id = synapse._id
             res['orid'] = syn_id
             ds = q.owned_by(cls='DataSource')
