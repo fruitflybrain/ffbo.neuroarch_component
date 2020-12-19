@@ -550,7 +550,8 @@ class AppSession(ApplicationSession):
     @inlineCallbacks
     def onJoin(self, details):
         self.server_config = {six.u('name'): six.u(self.config.extra['name']),
-                              six.u('dataset'): six.u(self.config.extra['dataset'])}
+                              six.u('dataset'): six.u(self.config.extra['dataset']),
+                              six.u('autobahn'): six.u(autobahn.__version__)}
         self.db_connection = graph_connection(
                                 database=self.config.extra['database'],
                                 username = self.config.extra['username'],
