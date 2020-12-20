@@ -229,11 +229,11 @@ class neuroarch_server(object):
                             #output= df[['sample','identifier','x','y','z','r','parent','name']].to_dict(orient='index')
                             #output= df.to_dict(orient='index')
                             #output = output.get_data(cls='MorphologyData', as_type='nx').node
-                            referenceIds = {n.uname: n.referenceId for n in output.nodes_as_objs}
-                            morphology_data = output.gen_traversal_out(['HasData', 'MorphologyData'], min_depth=0)
+                            referenceIds = {n.uname: n.referenceId for n in output.nodes_as_objs if isinstance(n, Neuron)}
                             output = dict(output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True))
                             for k, v in output.items():
-                                v['referenceId'] = referenceIds[v['uname']]
+                                if v['uname'] in referenceIds:
+                                    v['referenceId'] = referenceIds[v['uname']]
                         except KeyError:
                             output = {}
 
