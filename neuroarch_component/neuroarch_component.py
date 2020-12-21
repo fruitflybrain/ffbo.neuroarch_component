@@ -581,7 +581,8 @@ class AppSession(ApplicationSession):
                              'color': 'setcolor',
                              'keep' : 'remove',
                              'blink' : 'animate',
-                             'unblink' : 'unanimate'}
+                             'unblink' : 'unanimate',
+                             'remove': 'remove'}
 
         @inlineCallbacks
         def na_query(task,details=None):
