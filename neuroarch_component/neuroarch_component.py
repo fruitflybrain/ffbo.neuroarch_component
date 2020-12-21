@@ -117,16 +117,16 @@ def chunks(data, SIZE=1000):
 
 class graph_connection(object):
     def __init__(self, database='na_server', username='root', password='root'):
-        # try:
-        #     self.graph = Graph(Config('localhost', 2424,
-        #                               username, password, database, 'plocal',
-        #                               initial_drop=False,
-        #                               serialization_type=OrientSerialization.Binary))
-        # except:
-        #     #print "WARNING: Serialisation flag ignored"
-        self.graph = Graph(Config('localhost', 2424,
-                                  username, password, database, 'plocal',
-                                  initial_drop=False))
+        try:
+            self.graph = Graph(Config('localhost', 2424,
+                                      username, password, database, 'plocal',
+                                      initial_drop=False,
+                                      serialization_type=OrientSerialization.Binary))
+        except:
+            #print "WARNING: Serialisation flag ignored"
+            self.graph = Graph(Config('localhost', 2424,
+                                      username, password, database, 'plocal',
+                                      initial_drop=False))
         self.graph.include(Node.registry)
         self.graph.include(Relationship.registry)
 
