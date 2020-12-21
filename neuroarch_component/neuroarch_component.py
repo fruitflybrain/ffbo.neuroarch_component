@@ -1,5 +1,5 @@
 
-import sys
+import sys, traceback
 import re
 import pickle
 import os
@@ -163,7 +163,9 @@ class neuroarch_server(object):
             self.query_processor.process(task['query'],self.user)
             return True
         except Exception as e:
-            print(e)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            print("An error occured during 'process_query':\n" + tb)
             return False
 
     @staticmethod
@@ -211,7 +213,9 @@ class neuroarch_server(object):
                     try:
                         output = self.process_verb(output, user, task['verb'])
                     except Exception as e:
-                        print(e)
+                        exc_type, exc_value, exc_traceback = sys.exc_info()
+                        tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                        print("An error occured during 'process_verb':\n" + tb)
                     if not task['verb'] == 'add':
                         if task['format'] == 'morphology':
                             output = output.get_data_rids(cls='MorphologyData')
@@ -299,7 +303,9 @@ class neuroarch_server(object):
                         if output[0]==None:
                             succ=False
                     except Exception as e:
-                        print(e)
+                        exc_type, exc_value, exc_traceback = sys.exc_info()
+                        tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                        print("An error occured during 'query':\n" + tb)
                         succ = False
                     self._busy = False
                     if 'temp' in task and task['temp'] and len(user.state)>=2:
@@ -308,7 +314,9 @@ class neuroarch_server(object):
                 self._busy = False
                 return succ
         except Exception as e:
-            print(e)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            print("An error occured during 'receive_task':\n" + tb)
             self._busy = False
 
 class query_processor():
@@ -614,19 +622,26 @@ class AppSession(ApplicationSession):
                     yield self.call(uri, {'info':{'error':
                                                   'Error executing query on NeuroArch'}})
             except Exception as e:
-                print(e)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                print("An error occured when calling 'receive_msg':\n" + tb)
 
             try:
                 if(task['format'] == 'morphology' and (not 'verb' in task or task['verb'] == 'show')):
                     yield self.call(cmd_uri,
                                     {'commands': {'reset':''}})
             except Exception as e:
-                print(e)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                print("An error occured during 'receive_cmd':\n" + tb)
 
             if('verb' in task and task['verb'] not in ['add','show']):
                 try:
                     task['verb'] = verb_translations[task['verb']]
                 except Exception as e:
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                    print("An error occured during 'verb_translation':\n" + tb)
                     pass
 
                 args = []
@@ -1022,7 +1037,9 @@ class AppSession(ApplicationSession):
                 #res = yield threads.deferToThread(get_data_sub, q)
                 res = yield callback(q)
             except Exception as e:
-                print(e)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                print("An error occured during 'na_get_data':\n" + tb)
                 self.log.failure("Error Retrieveing Data")
                 res = {}
             returnValue(res)
