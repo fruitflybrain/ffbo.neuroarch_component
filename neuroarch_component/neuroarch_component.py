@@ -620,6 +620,15 @@ class AppSession(ApplicationSession):
                                 self.db_connection)['server']
             (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
 
+            if not succ:
+                print("attempt to restart connection to DB.")
+                self.db_connection = graph_connection(
+                    database = self.config.extra['database'],
+                    username = self.config.extra['username'],
+                    password = self.config.extra['password'])
+                server = self.user_list.user(user_id, self.db_connection['server'])
+                (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
+
             uri = 'ffbo.ui.receive_msg.%s' % user_id
             if not(type(uri)==six.text_type): uri = six.u(uri)
             cmd_uri = 'ffbo.ui.receive_cmd.%s' % user_id
