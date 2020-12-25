@@ -158,7 +158,7 @@ class neuroarch_server(object):
     def process_query(self,task):
         """ configure a task processing, and format the results as desired """
         # WIP: Expand type of information that can be retrieved
-        assert 'query'in task.keys()
+        assert 'query' in task
         try:
             self.query_processor.process(task['query'],self.user)
             return True
@@ -180,6 +180,13 @@ class neuroarch_server(object):
         elif verb == 'remove':
             assert(len(user.state)>=2)
             user.state[-1] = user.state[-2] - output
+        elif verb == 'color':
+            if isinstance(output, list) and len(output) == 0:
+                user.state.pop(-1)
+                if len(user.state) > 1:
+                    output = user.state[-1] - user.state[-2]
+                else:
+                    output = user.state[-1]
         else:
             assert(len(user.state)>=2)
             cmd = {'undo':{'states':1}}
@@ -350,6 +357,9 @@ class query_processor():
         for q in query_list:
             # Assume each query must act on the previous result, is this valid?
             task_memory.append(self.process_single(q,user,task_memory))
+        if not len(task_memory):
+            user.append([])
+            return []
         if 'temp' in query_list[-1] and query_list[-1]['temp']:
             return task_memory[-1]
         output = task_memory[-1]
