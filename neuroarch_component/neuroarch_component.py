@@ -626,7 +626,7 @@ class AppSession(ApplicationSession):
                     database = self.config.extra['database'],
                     username = self.config.extra['username'],
                     password = self.config.extra['password'])
-                server = self.user_list.user(user_id, self.db_connection['server'])
+                server = self.user_list.user(user_id, self.db_connection)['server']
                 (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
 
             uri = 'ffbo.ui.receive_msg.%s' % user_id
