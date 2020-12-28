@@ -187,6 +187,8 @@ class neuroarch_server(object):
                     output = user.state[-1] - user.state[-2]
                 else:
                     output = user.state[-1]
+            else:
+                user.state.pop[-1]
         else:
             assert(len(user.state)>=2)
             cmd = {'undo':{'states':1}}
@@ -244,7 +246,13 @@ class neuroarch_server(object):
                             output = dict(output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True))
                             for k, v in output.items():
                                 if v['uname'] in referenceIds:
-                                    v['referenceId'] = referenceIds[v['uname']]
+                                    v['referenceId'] = referenceIds[v['uname']
+
+                            output_dict = dict(output.get_as('nx', edges = False).nodes(data=True))
+                            morph = output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True)
+                            for n in morph:
+
+
                         except KeyError:
                             output = {}
 
