@@ -28,6 +28,7 @@ from autobahn.wamp import auth
 from autobahn.websocket.protocol import WebSocketClientFactory
 from operator import itemgetter
 
+from pyorient.exceptions import PyOrientConnectionException
 from pyorient.ogm import Graph, Config
 import pyorient.ogm.graph
 from pyorient.serializations import OrientSerialization
@@ -309,25 +310,26 @@ class neuroarch_server(object):
 
             elif 'query' in task:
                 succ = self.process_query(task)
-                if query_results:
-                    task['command'] = {"retrieve":{"state":0}}
-                    output = (None,)
-                    try:
+                if succ:
+                    if query_results:
+                        task['command'] = {"retrieve":{"state":0}}
+                        output = (None,)
+                        try:
+                            self._busy = False
+                            output = self.receive_task(task, threshold)
+                            if output[0]==None:
+                                succ=False
+                        except Exception as e:
+                            exc_type, exc_value, exc_traceback = sys.exc_info()
+                            tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                            print("An error occured during 'query':\n" + tb)
+                            succ = False
                         self._busy = False
-                        output = self.receive_task(task, threshold)
-                        if output[0]==None:
-                            succ=False
-                    except Exception as e:
-                        exc_type, exc_value, exc_traceback = sys.exc_info()
-                        tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                        print("An error occured during 'query':\n" + tb)
-                        succ = False
-                    self._busy = False
-                    if 'temp' in task and task['temp'] and len(user.state)>=2:
-                        user.process_command({'undo':{'states':1}})
-                    return (output[0], succ)
+                        if 'temp' in task and task['temp'] and len(user.state)>=2:
+                            user.process_command({'undo':{'states':1}})
+                        return (output[0], succ)
                 self._busy = False
-                return succ
+                return None, succ
         except Exception as e:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
@@ -512,11 +514,17 @@ class user_list():
         self.debug = debug
         pass
 
-    def user(self, user_id, db, debug = False):
+    def user(self, user_id, db, force_reconnect = False):
         if user_id not in self.list:
             st = state.State(user_id)
             self.list[user_id] = {'state': st,
                                   'server': neuroarch_server(db, user = st, debug = self.debug)}
+        else:
+            if force_reconnect:
+                st = self.list[user_id]['state']
+                self.list[user_id] = {'state': st,
+                                      'server': neuroarch_server(
+                                            db, user = st, debug = self.debug)}
         return self.list[user_id]
 
     def cleanup(self):
@@ -634,7 +642,7 @@ class AppSession(ApplicationSession):
                     database = self.config.extra['database'],
                     username = self.config.extra['username'],
                     password = self.config.extra['password'])
-                server = self.user_list.user(user_id, self.db_connection)['server']
+                server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
                 (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
 
             uri = 'ffbo.ui.receive_msg.%s' % user_id
@@ -1064,6 +1072,40 @@ class AppSession(ApplicationSession):
                         callback = get_data_sub
                 #res = yield threads.deferToThread(get_data_sub, q)
                 res = yield callback(q)
+            except (PyOrientConnectionException, ValueError) as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                print("An error occured during 'na_get_data':\n" + tb)
+                print("attempt to restart connection to DB.")
+                self.db_connection = graph_connection(
+                    database = self.config.extra['database'],
+                    username = self.config.extra['username'],
+                    password = self.config.extra['password'])
+                server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
+                print('success')
+                try:
+                    if not is_rid(task['id']):
+                        returnValue({})
+                    elem = server.graph.get_element(task['id'])
+                    q = QueryWrapper.from_objs(server.graph,[elem], self.na_debug)
+                    callback = get_data_sub if elem.element_type == 'Neuron' else get_syn_data_sub
+                    if not (elem.element_type == 'Neuron' or elem.element_type == 'Synapse' or elem.element_type=='InferredSynapse'):
+                        qn = q.gen_traversal_in(['HasData','Neuron'],min_depth=1)
+                        if not qn.nodes:
+                            q = q.gen_traversal_in(['HasData',['Synapse', 'InferredSynapse']],min_depth=1)
+                            if not q.nodes:
+                                raise ValueError('Did not find the Synapse node')
+                        else:
+                            q = qn
+                            callback = get_data_sub
+                    #res = yield threads.deferToThread(get_data_sub, q)
+                    res = yield callback(q)
+                except Exception as e:
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                    print("An error occured during 'na_get_data':\n" + tb)
+                    self.log.failure("Error Retrieveing Data")
+                    res = {}
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
