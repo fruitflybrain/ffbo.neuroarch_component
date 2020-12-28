@@ -247,13 +247,7 @@ class neuroarch_server(object):
                             output = dict(output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True))
                             for k, v in output.items():
                                 if v['uname'] in referenceIds:
-                                    v['referenceId'] = referenceIds[v['uname']
-
-                            output_dict = dict(output.get_as('nx', edges = False).nodes(data=True))
-                            morph = output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True)
-                            for n in morph:
-
-
+                                    v['referenceId'] = referenceIds[v['uname']]
                         except KeyError:
                             output = {}
 
