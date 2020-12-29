@@ -189,7 +189,7 @@ class neuroarch_server(object):
                 else:
                     output = user.state[-1]
             else:
-                user.state.pop[-1]
+                user.state.pop(-1)
         else:
             assert(len(user.state)>=2)
             cmd = {'undo':{'states':1}}
