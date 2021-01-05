@@ -11,6 +11,7 @@ from math import isnan
 from configparser import ConfigParser
 import uuid
 from itertools import islice
+import numbers
 
 import six
 import numpy as np
@@ -33,8 +34,10 @@ from pyorient.ogm import Graph, Config
 import pyorient.ogm.graph
 from pyorient.serializations import OrientSerialization
 
-from neuroarch.models import *
+# from neuroarch.models import *
+import neuroarch.models as models
 from neuroarch.query import QueryWrapper, QueryString, _list_repr
+import neuroarch.na as na
 
 # User access
 import state
@@ -116,20 +119,21 @@ def chunks(data, SIZE=1000):
     for i in range(0, len(data), SIZE):
         yield {k:data[k] for k in islice(it, SIZE)}
 
-class graph_connection(object):
-    def __init__(self, database='na_server', username='root', password='root'):
-        try:
-            self.graph = Graph(Config('localhost', 2424,
-                                      username, password, database, 'plocal',
-                                      initial_drop=False,
-                                      serialization_type=OrientSerialization.Binary))
-        except:
-            #print "WARNING: Serialisation flag ignored"
-            self.graph = Graph(Config('localhost', 2424,
-                                      username, password, database, 'plocal',
-                                      initial_drop=False))
-        self.graph.include(Node.registry)
-        self.graph.include(Relationship.registry)
+# class graph_connection(object):
+#     def __init__(self, database='na_server', username='root', password='root'):
+#         try:
+#             self.graph = Graph(Config('localhost', 2424,
+#                                       username, password, database, 'plocal',
+#                                       initial_drop=False,
+#                                       serialization_type=OrientSerialization.Binary))
+#
+#         except:
+#             #print "WARNING: Serialisation flag ignored"
+#             self.graph = Graph(Config('localhost', 2424,
+#                                       username, password, database, 'plocal',
+#                                       initial_drop=False))
+#         self.graph.include(models.Node.registry)
+#         self.graph.include(models.Relationship.registry)
 
 class neuroarch_server(object):
     """ Methods to process neuroarch json tasks """
@@ -243,7 +247,7 @@ class neuroarch_server(object):
                             #output= df[['sample','identifier','x','y','z','r','parent','name']].to_dict(orient='index')
                             #output= df.to_dict(orient='index')
                             #output = output.get_data(cls='MorphologyData', as_type='nx').node
-                            referenceIds = {n.uname: n.referenceId for n in output.nodes_as_objs if isinstance(n, Neuron)}
+                            referenceIds = {n.uname: n.referenceId for n in output.nodes_as_objs if isinstance(n, models.Neuron)}
                             output = dict(output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True))
                             for k, v in output.items():
                                 if v['uname'] in referenceIds:
@@ -330,6 +334,7 @@ class neuroarch_server(object):
             print("An error occured during 'receive_task':\n" + tb)
             self._busy = False
 
+
 class query_processor():
 
     def __init__(self, graph, debug = False):
@@ -341,9 +346,9 @@ class query_processor():
     def load_class_list(self):
         # Dynamically build acceptable methods from the registry
         # This could potentially be made stricter with a custom hardcoded subset
-        for k in Node.registry:
+        for k in models.Node.registry:
             try:
-                plural = eval(k + ".registry_plural")
+                plural = eval('models.' + k + ".registry_plural")
                 self.class_list[k]=eval("self.graph." + plural)
             except:
                 print("Warning:Class %s left out of class list" % k)
@@ -584,10 +589,12 @@ class AppSession(ApplicationSession):
         self.server_config = {six.u('name'): six.u(self.config.extra['name']),
                               six.u('dataset'): six.u(self.config.extra['dataset']),
                               six.u('autobahn'): six.u(autobahn.__version__)}
-        self.db_connection = graph_connection(
-                                database=self.config.extra['database'],
-                                username = self.config.extra['username'],
-                                password = self.config.extra['password'])
+        self.db_connection = na.NeuroArch(
+                                self.config.extra['database'],
+                                user = self.config.extra['username'],
+                                password = self.config.extra['password'],
+                                port = self.config.extra['port'],
+                                mode = 'r')
         self.na_debug = self.config.extra['debug']
         self._max_concurrency = 10
         self._current_concurrency = 0
@@ -632,10 +639,7 @@ class AppSession(ApplicationSession):
 
             if not succ:
                 print("attempt to restart connection to DB.")
-                self.db_connection = graph_connection(
-                    database = self.config.extra['database'],
-                    username = self.config.extra['username'],
-                    password = self.config.extra['password'])
+                self.db_connection.reconnect()
                 server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
                 (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
 
@@ -1071,10 +1075,7 @@ class AppSession(ApplicationSession):
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 print("An error occured during 'na_get_data':\n" + tb)
                 print("attempt to restart connection to DB.")
-                self.db_connection = graph_connection(
-                    database = self.config.extra['database'],
-                    username = self.config.extra['username'],
-                    password = self.config.extra['password'])
+                self.db_connection.reconnect()
                 server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
                 print('success')
                 try:
@@ -1379,6 +1380,8 @@ if __name__ == '__main__':
                         help='name of server, default to the same database name')
     parser.add_argument('--dataset', dest='dataset', type=six.text_type, default=None,
                         help='name of dataset, default to the same database name')
+    parser.add_argument('--port', dest='port', type=int, default=2424,
+                        help='binary port of orientdb, default to 2424')
     parser.set_defaults(ssl=ssl)
     parser.set_defaults(debug=debug)
 
@@ -1405,7 +1408,8 @@ if __name__ == '__main__':
         name = args.name
     # any extra info we want to forward to our ClientSession (in self.config.extra)
     extra = {'auth': True, 'database': args.db, 'username': args.user,
-             'password': pw, 'debug': args.debug, 'dataset': dataset, 'name': name}
+             'password': pw, 'port': args.port, 'debug': args.debug,
+             'dataset': dataset, 'name': name}
 
     if args.ssl:
         st_cert=open(args.ca_cert_file, 'rt').read()
