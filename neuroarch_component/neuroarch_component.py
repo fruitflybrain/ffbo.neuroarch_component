@@ -452,25 +452,29 @@ class query_processor():
                 else:
                     raise ValueError('rid must be either a list of rids or str')
             else:
-                method_call = query['action']['method']
-
-
-                assert len(method_call.keys()) == 1
-                method_name = list(method_call.keys())[0]
-                # check method is valid
-                assert method_name in dir(type(na_object))
-                # Retrieve arguments
-                method_args = byteify(method_call[method_name])
-
-                if 'pass_through' in method_args:
-                    pass_through = method_args.pop('pass_through')
-                    if isinstance(pass_through,list) and pass_through and isinstance(pass_through[0],list):
-                        query_result = getattr(na_object, method_name)(*pass_through,**method_args)
-                    else:
-                        query_result = getattr(na_object, method_name)(pass_through,**method_args)
+                if na_object is None:
+                    query_result = QueryWrapper.empty_query(self.graph, debug = self.debug)
                 else:
-                    query_result = getattr(na_object, method_name)(**method_args)
+                    method_call = query['action']['method']
+                    assert len(method_call.keys()) == 1
+                    method_name = list(method_call.keys())[0]
+                    # check method is valid
+                    assert method_name in dir(type(na_object))
+                    # Retrieve arguments
+                    method_args = byteify(method_call[method_name])
+
+                    if 'pass_through' in method_args:
+                        pass_through = method_args.pop('pass_through')
+                        if isinstance(pass_through,list) and pass_through and isinstance(pass_through[0],list):
+                            query_result = getattr(na_object, method_name)(*pass_through,**method_args)
+                        else:
+                            query_result = getattr(na_object, method_name)(pass_through,**method_args)
+                    else:
+                        query_result = getattr(na_object, method_name)(**method_args)
         elif 'op' in query['action']:
+            if na_object is None:
+                na_object = QueryWrapper.empty_query(self.graph, debug = self.debug)
+
             method_call = query['action']['op']
             assert len(method_call.keys()) == 1
             method_name = list(method_call.keys())[0]
