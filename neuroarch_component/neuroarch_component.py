@@ -1129,6 +1129,66 @@ class AppSession(ApplicationSession):
         # These users can mark a tag as feautured or assign a tag to a festured list
         approved_featured_tag_creators = []
 
+        @inlineCallbacks
+        def select_datasource(name, version):
+            try:
+                datasources = self.db_connection.find_objs('DataSource', name = name, version = version)
+                if len(datasources) == 1:
+                    self.db_connection.default_DataSource = datasources[0]
+                    return({'success': {'message': 'Default DataSource set'}})
+                elif len(datasources) == 0:
+                    return({'error':
+                                {'message': 'Cannot find DataSource named {name} with version {version}'.format(
+                                        name = name, version = version),
+                                 'exception': ''}})
+                else:
+                    return({'error':
+                                {'message': 'Multiple datasources named {name} with version {version} found'.format(
+                                        name = name, version = version),
+                                 'exception': ''}})
+            except Exception as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                message = "An error occured during 'select_datasource'"
+                print(message + ":\n" + tb)
+                return({'error': {'message': message,
+                                       'exception': tb}})
+
+        uri = six.u( 'ffbo.na.datasource.%s' % str(details.session) )
+        yield self.register(select_datasource, uri)
+
+        @inlineCallbacks
+        def add_neuron(uname,
+                       name,
+                       referenceId = None,
+                       locality = None,
+                       synonyms = None,
+                       info = None,
+                       morphology = None,
+                       arborization = None,
+                       neurotransmitters = None):
+            try:
+                res = yield threads.deferToThread(
+                            self.db_connection.add_neuron,
+                            uname, name, referenceId = referenceId,
+                            locality = locality, synonyms = synonyms,
+                            info = info, morphology = morphology,
+                            arborization = arborization,
+                            neurotransmitters = neurotransmitters,
+                            )
+                returnValue({'success': {'data': res._id}})
+            except Exception as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                message = "An error occured during 'add_neuron'"
+                print(message + ":\n" + tb)
+                returnValue({'error': {'message': message,
+                                       'exception': tb}})
+
+        uri = six.u( 'ffbo.na.add_neuron.%s' % str(details.session) )
+        yield self.register(add_neuron, uri)
+
+
         def create_tag(task, details=None):
             if not isinstance(task, dict):
                 task = json.loads(task)
