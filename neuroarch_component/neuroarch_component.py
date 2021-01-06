@@ -1009,8 +1009,8 @@ class AppSession(ApplicationSession):
             post_neuron = synapse.out('SendsTo')[0]
             pre_neuron = synapse.in_('SendsTo')[0]
 
-            post_neuron_morph = [n for n in post_neuron.out('HasData') if isinstance(n, MorphologyData)]
-            pre_neuron_morph = [n for n in pre_neuron.out('HasData') if isinstance(n, MorphologyData)]
+            post_neuron_morph = [n for n in post_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
+            pre_neuron_morph = [n for n in pre_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
 
             post_data = []
             neu_id = post_neuron._id
