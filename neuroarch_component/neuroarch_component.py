@@ -656,14 +656,19 @@ class AppSession(ApplicationSession):
             try:
                 if succ:
                     yield self.call(uri, {'info':{'success':
-                                                  'Fetching results from NeuroArch'}})
+                                                  'Fetching results from NeuroArch',
+                                                  'queryID': task.get('queryID', '')}})
                 else:
-                    yield self.call(uri, {'info':{'error':
-                                                  'Error executing query on NeuroArch'}})
+                    # yield self.call(uri, {'info':{'error':
+                    #                               'Error executing query on NeuroArch'}})
+                    returnValue({'info':{'error':
+                                           'Error executing query on NeuroArch'}})
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 print("An error occured when calling 'receive_msg':\n" + tb)
+                returnValue({'info':{'error':
+                                       'Error executing query on NeuroArch'}})
 
             try:
                 if(task['format'] == 'morphology' and (not 'verb' in task or task['verb'] == 'show')):
@@ -673,6 +678,8 @@ class AppSession(ApplicationSession):
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 print("An error occured during 'receive_cmd':\n" + tb)
+                returnValue({'info':{'error':
+                                       'Error executing query on NeuroArch'}})
 
             if('verb' in task and task['verb'] not in ['add','show']):
                 try:
@@ -681,14 +688,16 @@ class AppSession(ApplicationSession):
                     exc_type, exc_value, exc_traceback = sys.exc_info()
                     tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                     print("An error occured during 'verb_translation':\n" + tb)
-                    pass
+                    returnValue({'info':{'error':
+                                           'Error executing query on NeuroArch'}})
 
                 args = []
                 if 'color' in task: task['color'] = '#' + task['color']
                 for kw in arg_kws:
                     if kw in task: args.append(task[kw])
                 if len(args)==1: args=args[0]
-                yield self.call(cmd_uri, {'commands': {task['verb']: [res, args]}})
+                yield self.call(cmd_uri, {'commands': {task['verb']: [res, args]},
+                                          'queryID': task.get('queryID', '')})
                 self.na_query_on_end()
                 returnValue({'info':{'success':'Finished processing command'}})
             else:
