@@ -333,6 +333,7 @@ class neuroarch_server(object):
             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             print("An error occured during 'receive_task':\n" + tb)
             self._busy = False
+            return None, False
 
 
 class query_processor():
