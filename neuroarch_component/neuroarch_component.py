@@ -244,14 +244,17 @@ class neuroarch_server(object):
                     if task['format'] == 'morphology':
                         #df = output.get_data(cls='MorphologyData')[0]
                         try:
-                            #output= df[['sample','identifier','x','y','z','r','parent','name']].to_dict(orient='index')
-                            #output= df.to_dict(orient='index')
-                            #output = output.get_data(cls='MorphologyData', as_type='nx').node
-                            referenceIds = {n.uname: n.referenceId for n in output.nodes_as_objs if isinstance(n, models.Neuron)}
-                            output = dict(output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True))
-                            for k, v in output.items():
-                                if v['uname'] in referenceIds:
-                                    v['referenceId'] = referenceIds[v['uname']]
+                            all_data = output.get_data_qw(cls = 'MorphologyData')
+                            c = (output + all_data).get_as(as_type = 'nx', edges = True)
+                            output = {}
+                            for node, data in c.nodes(data = True):
+                                if data['class'] in ['Neuron', 'Synapse']:
+                                    output[node] = data
+                                    for n, d in c.out_edges(node):
+                                        outV = c.nodes[d]
+                                        if outV['class'] == 'MorphologyData':
+                                            output[node]['MorphologyData'] = outV
+                                            output[node]['MorphologyData']['rid'] = d
                         except KeyError:
                             output = {}
 
