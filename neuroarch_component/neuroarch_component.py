@@ -176,8 +176,11 @@ class neuroarch_server(object):
     @staticmethod
     def process_verb(output, user, verb):
         if verb == 'add':
-            assert(len(user.state)>=2)
-            user.state[-1] = output+user.state[-2]
+            # assert(len(user.state)>=2)
+            if len(user.state) >= 2:
+                user.state[-1] = output+user.state[-2]
+            else:
+                pass
         elif verb == 'keep':
             assert(len(user.state)>=2)
             user.state[-1] = output & user.state[-2]
