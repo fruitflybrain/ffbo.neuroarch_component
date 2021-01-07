@@ -176,8 +176,11 @@ class neuroarch_server(object):
     @staticmethod
     def process_verb(output, user, verb):
         if verb == 'add':
-            assert(len(user.state)>=2)
-            user.state[-1] = output+user.state[-2]
+            # assert(len(user.state)>=2)
+            if len(user.state) >= 2:
+                user.state[-1] = output+user.state[-2]
+            else:
+                pass
         elif verb == 'keep':
             assert(len(user.state)>=2)
             user.state[-1] = output & user.state[-2]
@@ -244,14 +247,17 @@ class neuroarch_server(object):
                     if task['format'] == 'morphology':
                         #df = output.get_data(cls='MorphologyData')[0]
                         try:
-                            #output= df[['sample','identifier','x','y','z','r','parent','name']].to_dict(orient='index')
-                            #output= df.to_dict(orient='index')
-                            #output = output.get_data(cls='MorphologyData', as_type='nx').node
-                            referenceIds = {n.uname: n.referenceId for n in output.nodes_as_objs if isinstance(n, models.Neuron)}
-                            output = dict(output.get_data(cls='MorphologyData', as_type='nx', edges = False, deepcopy=False).nodes(data=True))
-                            for k, v in output.items():
-                                if v['uname'] in referenceIds:
-                                    v['referenceId'] = referenceIds[v['uname']]
+                            all_data = output.get_data_qw(cls = 'MorphologyData')
+                            c = (output + all_data).get_as(as_type = 'nx', edges = True)
+                            output = {}
+                            for node, data in c.nodes(data = True):
+                                if data['class'] in ['Neuron', 'Synapse']:
+                                    output[node] = data
+                                    for n, d in c.out_edges(node):
+                                        outV = c.nodes[d]
+                                        if outV['class'] == 'MorphologyData':
+                                            output[node]['MorphologyData'] = outV
+                                            output[node]['MorphologyData']['rid'] = d
                         except KeyError:
                             output = {}
 
@@ -1015,8 +1021,8 @@ class AppSession(ApplicationSession):
             post_neuron = synapse.out('SendsTo')[0]
             pre_neuron = synapse.in_('SendsTo')[0]
 
-            post_neuron_morph = [n for n in post_neuron.out('HasData') if isinstance(n, MorphologyData)]
-            pre_neuron_morph = [n for n in pre_neuron.out('HasData') if isinstance(n, MorphologyData)]
+            post_neuron_morph = [n for n in post_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
+            pre_neuron_morph = [n for n in pre_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
 
             post_data = []
             neu_id = post_neuron._id
