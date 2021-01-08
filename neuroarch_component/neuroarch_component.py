@@ -247,21 +247,22 @@ class neuroarch_server(object):
                     if task['format'] == 'morphology':
                         #df = output.get_data(cls='MorphologyData')[0]
                         try:
-                            all_data = output.get_data_qw(cls = 'MorphologyData')
-                            c = (output + all_data).get_as(as_type = 'nx', edges = True)
-                            output = {}
-                            for node, data in c.nodes(data = True):
-                                if data['class'] in ['Neuron', 'Synapse']:
-                                    output[node] = data
-                                    for n, d in c.out_edges(node):
-                                        outV = c.nodes[d]
-                                        if outV['class'] == 'MorphologyData':
-                                            output[node]['MorphologyData'] = outV
-                                            output[node]['MorphologyData']['rid'] = d
-                            # nx_graph = output.gen_traversal_out(
-                            #             ['HasData', 'MorphologyData', 'instanceof'],
-                            #             min_depth = 0).get_as(as_type = 'nx', edges = True)
-                            # output = {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}
+                            # all_data = output.get_data_qw(cls = 'MorphologyData')
+                            # c = (output + all_data).get_as(as_type = 'nx', edges = True)
+                            # output = {}
+                            # for node, data in c.nodes(data = True):
+                            #     if data['class'] in ['Neuron', 'Synapse']:
+                            #         output[node] = data
+                            #         for n, d in c.out_edges(node):
+                            #             outV = c.nodes[d]
+                            #             if outV['class'] == 'MorphologyData':
+                            #                 output[node]['MorphologyData'] = outV
+                            #                 output[node]['MorphologyData']['rid'] = d
+                            nx_graph = output.gen_traversal_out(
+                                        ['HasData', 'MorphologyData', 'instanceof'],
+                                        min_depth = 0).get_as(as_type = 'nx', edges = True)
+                            output = {'nodes': dict(nx_graph.nodes(data=True)),
+                                      'edges': list(nx_graph.edges(data=True))}
                         except KeyError:
                             output = {}
 
