@@ -311,8 +311,14 @@ class neuroarch_server(object):
                     output = str(output)
                 if threshold and isinstance(output, dict):
                     chunked_output = []
-                    for c in chunks(output, threshold):
-                        chunked_output.append(c)
+                    if 'nodes' in output:
+                        for c in chunks(output['nodes'], threshold):
+                            chunked_output.append({'nodes': c, 'edges': []})
+                        for n in range(0, len(output['edges']), threshold):
+                            chunked_output.append({'nodes': {}, 'edges': output['edges'][n:n+threshold]})
+                    else:
+                        for c in chunks(output, threshold):
+                            chunked_output.append(c)
                     output = chunked_output
                 self._busy = False
                 return (output, True)
@@ -644,7 +650,7 @@ class AppSession(ApplicationSession):
             if details.progress:
                 threshold = task['threshold'] if 'threshold' in task else 20
             if 'verb' in task and task['verb'] not in ['add','show']: threshold=None
-            if task['format'] != 'morphology': threshold=None
+            if task['format'] not in ['morphology', 'nx']: threshold=None
 
             self.log.info("na_query() called with task: {task} ,(current concurrency {current_concurrency} of max {max_concurrency})", current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency, task=task)
 
