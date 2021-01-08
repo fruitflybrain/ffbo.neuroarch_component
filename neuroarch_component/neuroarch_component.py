@@ -311,14 +311,42 @@ class neuroarch_server(object):
                     output = str(output)
                 if threshold and isinstance(output, dict):
                     chunked_output = []
-                    if 'nodes' in output:
-                        for c in chunks(output['nodes'], threshold):
-                            chunked_output.append({'nodes': c, 'edges': []})
-                        for n in range(0, len(output['edges']), threshold):
-                            chunked_output.append({'nodes': {}, 'edges': output['edges'][n:n+threshold]})
-                    else:
-                        for c in chunks(output, threshold):
-                            chunked_output.append(c)
+                    if isinstance(threshold, int):
+                        if 'nodes' in output:
+                            for c in chunks(output['nodes'], threshold):
+                                chunked_output.append({'nodes': c, 'edges': []})
+                            for n in range(0, len(output['edges']), threshold):
+                                chunked_output.append({'nodes': {}, 'edges': output['edges'][n:n+threshold]})
+                        else:
+                            for c in chunks(output, threshold):
+                                chunked_output.append(c)
+                    elif threshold == 'auto':
+                        print('auto threshold')
+                        if 'nodes' in output:
+                            n_th = 50000
+                            morph_th = 20
+                            n = 0
+                            morph = 0
+                            nodes = {}
+                            for k, v in output['nodes'].items():
+                                if issubclass(getattr(models, v['class']), models.MorphologyData):
+                                    morph += 1
+                                else:
+                                    n += 1
+                                nodes[k] = v
+                                if morph == morph_th or n == n_th:
+                                    chunked_output.append({'nodes': nodes, 'edges': []})
+                                    nodes = {}
+                                    n = 0
+                                    morph = 0
+                            if n > 0 or morph > 0:
+                                chunked_output.append({'nodes': nodes, 'edges': []})
+                                nodes = {}
+                            for n in range(0, len(output['edges']), 50000):
+                                chunked_output.append({'nodes': {}, 'edges': output['edges'][n:n+50000]})
+                        else:
+                            for c in chunks(output, 20):
+                                chunked_output.append(c)
                     output = chunked_output
                 self._busy = False
                 return (output, True)
