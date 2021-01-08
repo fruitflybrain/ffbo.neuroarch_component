@@ -258,10 +258,15 @@ class neuroarch_server(object):
                                         if outV['class'] == 'MorphologyData':
                                             output[node]['MorphologyData'] = outV
                                             output[node]['MorphologyData']['rid'] = d
+                            # nx_graph = output.gen_traversal_out(
+                            #             ['HasData', 'MorphologyData', 'instanceof'],
+                            #             min_depth = 0).get_as(as_type = 'nx', edges = True)
+                            # output = {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}
                         except KeyError:
                             output = {}
 
                     elif task['format'] == 'no_result':
+                        print(len(output))
                         output = {}
                     elif task['format'] == 'get_data':
                         if 'cls' in task:
@@ -667,23 +672,39 @@ class AppSession(ApplicationSession):
                 else:
                     # yield self.call(uri, {'info':{'error':
                     #                               'Error executing query on NeuroArch'}})
+                    self.na_query_on_end()
                     returnValue({'info':{'error':
                                            'Error executing query on NeuroArch'}})
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 print("An error occured when calling 'receive_msg':\n" + tb)
+                self.na_query_on_end()
                 returnValue({'info':{'error':
                                        'Error executing query on NeuroArch'}})
 
             try:
                 if(task['format'] == 'morphology' and (not 'verb' in task or task['verb'] == 'show')):
                     yield self.call(cmd_uri,
-                                    {'commands': {'reset':''}})
+                                    {'commands': {'reset':''},
+                                     'queryID': task.get('queryID', '')})
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 print("An error occured during 'receive_cmd':\n" + tb)
+                self.na_query_on_end()
+                returnValue({'info':{'error':
+                                       'Error executing query on NeuroArch'}})
+
+            try:
+                if ('command' in task and 'restart' in task['command']):
+                    self.na_query_on_end()
+                    returnValue({'info':{'success':'Finished processing command'}})
+            except Exception as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                print("An error occured during 'verb_translation':\n" + tb)
+                self.na_query_on_end()
                 returnValue({'info':{'error':
                                        'Error executing query on NeuroArch'}})
 
@@ -694,6 +715,7 @@ class AppSession(ApplicationSession):
                     exc_type, exc_value, exc_traceback = sys.exc_info()
                     tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                     print("An error occured during 'verb_translation':\n" + tb)
+                    self.na_query_on_end()
                     returnValue({'info':{'error':
                                            'Error executing query on NeuroArch'}})
 
