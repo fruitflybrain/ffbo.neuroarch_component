@@ -258,11 +258,26 @@ class neuroarch_server(object):
                             #             if outV['class'] == 'MorphologyData':
                             #                 output[node]['MorphologyData'] = outV
                             #                 output[node]['MorphologyData']['rid'] = d
+                            node_ids = [node._id for node in output.nodes_as_objs]
                             nx_graph = output.gen_traversal_out(
                                         ['HasData', 'MorphologyData', 'instanceof'],
                                         min_depth = 0).get_as(as_type = 'nx', edges = True)
-                            output = {'nodes': dict(nx_graph.nodes(data=True)),
-                                      'edges': list(nx_graph.edges(data=True))}
+                            if threshold:
+                                chunked_output = []
+                                if threshold == 'auto':
+                                    new_threshold = 20
+                                else:
+                                    new_threshold = threshold
+                                for n in range(0, len(node_ids), new_threshold):
+                                    nodes = node_ids[n:n+new_threshold]
+                                    morph_nodes = []
+                                    for node in nodes:
+                                        morph_nodes.extend([rid for _, rid, v in nx_graph.out_edges(node, data = True) if v.get('class', None) == 'HasData'])
+                                    subg = nx_graph.subgraph(nodes+morph_nodes)
+                                    chunked_output.append({
+                                             'nodes': dict(subg.nodes(data=True)),
+                                             'edges': list(subg.edges(data=True))})
+                            output = chunked_output
                         except KeyError:
                             output = {}
 
