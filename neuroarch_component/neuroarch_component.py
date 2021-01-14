@@ -12,6 +12,7 @@ from configparser import ConfigParser
 import uuid
 from itertools import islice
 import numbers
+import inspect
 
 import six
 import numpy as np
@@ -24,6 +25,7 @@ from autobahn.twisted.util import sleep
 from autobahn.twisted.wamp import ApplicationSession, ApplicationRunner
 from twisted.internet import reactor, threads
 from autobahn.wamp.exception import ApplicationError
+from autobahn.wamp.serializer import MsgPackObjectSerializer, JsonObjectSerializer, JsonSerializer
 from autobahn.wamp.types import RegisterOptions
 from autobahn.wamp import auth
 from autobahn.websocket.protocol import WebSocketClientFactory
@@ -118,6 +120,32 @@ def chunks(data, SIZE=1000):
     it = iter(data)
     for i in range(0, len(data), SIZE):
         yield {k:data[k] for k in islice(it, SIZE)}
+
+NA_ALLOWED_WRTIE_METHODS = [
+    'add_Species',
+    'add_Tract',
+    'add_Neuropil',
+    'add_Subsystem',
+    'add_Subregion',
+    'add_Neuron',
+    'add_Synapse',
+    'add_InferredSynapse',
+    'add_morphology',
+    'add_neurotransmitter',
+    'add_DataSource',
+    'add_neuron_arborization',
+    'add_synapse_arborization',
+    'update_Neuron',
+    'update_Synapse',
+    'remove_Neurons',
+    'remove_Synapses',
+    'remove_Synapses_between',
+]
+
+NA_ALLOWED_QUERY_METHODS = [
+    'available_DataSources'
+]
+
 
 # class graph_connection(object):
 #     def __init__(self, database='na_server', username='root', password='root'):
@@ -583,13 +611,16 @@ class user_list():
         if user_id not in self.list:
             st = state.State(user_id)
             self.list[user_id] = {'state': st,
-                                  'server': neuroarch_server(db, user = st, debug = self.debug)}
+                                  'server': neuroarch_server(db, user = st, debug = self.debug),
+                                  'default_datasource': None}
         else:
             if force_reconnect:
                 st = self.list[user_id]['state']
+                ds = self.list[user_id]['default_datasource']
                 self.list[user_id] = {'state': st,
                                       'server': neuroarch_server(
-                                            db, user = st, debug = self.debug)}
+                                            db, user = st, debug = self.debug),
+                                      'default_datasource': ds}
         return self.list[user_id]
 
     def cleanup(self):
@@ -602,6 +633,12 @@ class user_list():
             del self.list[user]
 
         return cleansed
+
+    def set_default_datasource(self, user_id, data_source):
+        self.list[user_id]['default_datasource'] = data_source
+
+    def get_default_datasource(self, user_id):
+        return self.list[user_id]['default_datasource']
 
 
 class AppSession(ApplicationSession):
@@ -660,7 +697,7 @@ class AppSession(ApplicationSession):
                                 user = self.config.extra['username'],
                                 password = self.config.extra['password'],
                                 port = self.config.extra['port'],
-                                mode = 'r')
+                                mode = self.config.extra['mode'])
         self.na_debug = self.config.extra['debug']
         self._max_concurrency = 10
         self._current_concurrency = 0
@@ -932,85 +969,6 @@ class AppSession(ApplicationSession):
                     pre_data.append(info)
                 pre_data = sorted(pre_data, key=lambda x: x['number'])
 
-            # OLDER IMPLEMENTATION
-            # post_syn_q = q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
-            # pre_syn_q = q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],['SendsTo','Neuron'],min_depth=1)
-            # post_syn_q.execute_edges(edge_class = 'SendsTo')
-            # post_syn = post_syn_q.get_as('nx', deepcopy = False)
-            # pre_syn_q.execute_edges(edge_class = 'SendsTo')
-            # pre_syn = pre_syn_q.get_as('nx', deepcopy = False)
-            # if post_syn.nodes() or pre_syn.nodes():
-            #     post_rids = str(post_syn.nodes()).replace("'","")
-            #     pre_rids = str(pre_syn.nodes()).replace("'","")
-            #
-            #     post_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % post_rids
-            #     pre_map_command = "select $path from (traverse out('HasData') from %s while $depth<=1) where @class='MorphologyData'" % pre_rids
-            #
-            #     post_map_l = [x.oRecordData['$path'] for x in q._graph.client.command(post_map_command)]
-            #     pre_map_l = [x.oRecordData['$path'] for x in q._graph.client.command(pre_map_command)]
-            #
-            #     post_map = {}
-            #     pre_map = {}
-            #
-            #     for p in post_map_l:
-            #         m = re.findall('\#\d+\:\d+', p)
-            #         if len(m)==2:
-            #             post_map[m[0]] = m[1]
-            #
-            #     for p in pre_map_l:
-            #         m = re.findall('\#\d+\:\d+', p)
-            #         if len(m)==2:
-            #             pre_map[m[0]] = m[1]
-            #
-            #     post_data = []
-            #     for (syn, neu) in post_syn.edges():
-            #         if not (post_syn.node[syn]['class']  == 'InferredSynapse' or
-            #                 post_syn.node[syn]['class']  == 'Synapse'):
-            #             continue
-            #         info = {'has_morph': 0, 'has_syn_morph': 0}
-            #         if 'N' not in post_syn.node[syn]:
-            #             print post_syn.node[syn]
-            #             info['number'] = 1
-            #         else:
-            #             info['number'] =  post_syn.node[syn]['N']
-            #         if neu in post_map:
-            #             info['has_morph'] = 1
-            #             info['rid'] = post_map[neu]
-            #         if syn in post_map:
-            #             info['has_syn_morph'] = 1
-            #             info['syn_rid'] = post_map[syn]
-            #             if 'uname' in post_syn.node[syn]:
-            #                 info['syn_uname'] = post_syn.node[syn]['uname']
-            #         info['inferred'] = (post_syn.node[syn]['class'] == 'InferredSynapse')
-            #         info.update(post_syn.node[neu])
-            #         post_data.append(info)
-            #
-            #     post_data = sorted(post_data, key=lambda x: x['number'])
-            #
-            #     pre_data = []
-            #     for (neu, syn) in pre_syn.edges():
-            #         if not (pre_syn.node[syn]['class']  == 'InferredSynapse' or
-            #                 pre_syn.node[syn]['class']  == 'Synapse'):
-            #             continue
-            #         info = {'has_morph': 0, 'has_syn_morph': 0}
-            #         if 'N' not in pre_syn.node[syn]:
-            #             print pre_syn.node[syn]
-            #             info['number'] = 1
-            #         else:
-            #             info['number'] =  pre_syn.node[syn]['N']
-            #         if neu in pre_map:
-            #             info['has_morph'] = 1
-            #             info['rid'] = pre_map[neu]
-            #         if syn in pre_map:
-            #             info['has_syn_morph'] = 1
-            #             info['syn_rid'] = pre_map[syn]
-            #             if 'uname' in pre_syn.node[syn]:
-            #                 info['syn_uname'] = pre_syn.node[syn]['uname']
-            #         info['inferred'] = (pre_syn.node[syn]['class'] == 'InferredSynapse')
-            #         info.update(pre_syn.node[neu])
-            #         pre_data.append(info)
-            #     pre_data = sorted(pre_data, key=lambda x: x['number'])
-
                 # Summary PreSyn Information
                 pre_sum = {}
                 for x in pre_data:
@@ -1208,63 +1166,150 @@ class AppSession(ApplicationSession):
         approved_featured_tag_creators = []
 
         @inlineCallbacks
-        def select_datasource(name, version):
+        def NeuroArchWrite(method_name, *args, details = None, **kwargs):
+            if self.db_connection._mode == 'r':
+                returnValue({'error': {'message': 'Database is not writeable',
+                                       'exception': 'Database is not writeable'}})
+            user_id = details.caller
+            default_ds = self.user_list.user(
+                                user_id,
+                                self.db_connection)['default_datasource']
             try:
-                datasources = self.db_connection.find_objs('DataSource', name = name, version = version)
-                if len(datasources) == 1:
-                    self.db_connection.default_DataSource = datasources[0]
-                    return({'success': {'message': 'Default DataSource set'}})
-                elif len(datasources) == 0:
-                    return({'error':
-                                {'message': 'Cannot find DataSource named {name} with version {version}'.format(
-                                        name = name, version = version),
-                                 'exception': ''}})
+                assert method_name in NA_ALLOWED_WRTIE_METHODS, 'Operation {} not allowed.'.format(method_name)
+                func = getattr(self.db_connection, method_name)
+                spec = inspect.getfullargspec(func)
+                pass_default = False
+                if 'data_source' in spec.args:
+                    default_length = len(spec.defaults) if spec.defaults is not None else 0
+                    if len(spec.args)-spec.args.index('data_source') <= default_length:
+                        if spec.defaults[-(len(spec.args)-spec.args.index('data_source'))] is None:
+                            if 'data_source' in kwargs and kwargs['data_source'] is None:
+                                pass_default = True
+                if pass_default:
+                    kwargs.pop('data_source')
+                    output = yield threads.deferToThread(
+                        func, *args,
+                        data_source = self.user_list.get_default_datasource(user_id),
+                        **kwargs)
                 else:
-                    return({'error':
-                                {'message': 'Multiple datasources named {name} with version {version} found'.format(
-                                        name = name, version = version),
-                                 'exception': ''}})
+                    output = yield threads.deferToThread(func, *args, **kwargs)
+
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                message = "An error occured during 'select_datasource'"
-                print(message + ":\n" + tb)
-                return({'error': {'message': message,
-                                       'exception': tb}})
-
-        uri = six.u( 'ffbo.na.datasource.%s' % str(details.session) )
-        yield self.register(select_datasource, uri)
-
-        @inlineCallbacks
-        def add_neuron(uname,
-                       name,
-                       referenceId = None,
-                       locality = None,
-                       synonyms = None,
-                       info = None,
-                       morphology = None,
-                       arborization = None,
-                       neurotransmitters = None):
-            try:
-                res = yield threads.deferToThread(
-                            self.db_connection.add_neuron,
-                            uname, name, referenceId = referenceId,
-                            locality = locality, synonyms = synonyms,
-                            info = info, morphology = morphology,
-                            arborization = arborization,
-                            neurotransmitters = neurotransmitters,
-                            )
-                returnValue({'success': {'data': res._id}})
-            except Exception as e:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                message = "An error occured during 'add_neuron'"
+                message = "An error occured during NeuroArch call {}".format(method_name)
                 print(message + ":\n" + tb)
                 returnValue({'error': {'message': message,
                                        'exception': tb}})
+            try:
+                if issubclass(type(output), models.Node):
+                    res = {'success': {'data': {output._id: output.get_props()}}}
+                elif isinstance(output, list):
+                    res = {'success': {'data': [{n._id: n.get_props()} if issubclass(type(n), models.Node) else n for n in output]}}
+                elif isinstance(output, dict):
+                    res = {'success': {'data': {k: {v._id: v.get_props()} if issubclass(type(v), models.Node) else v for k, v in output.items()}}}
+                elif isinstance(output, QueryWrapper):
+                    nx_graph = output.get_as('nx')
+                    res = {'success': {'data': {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}}}
+                else:
+                    res = {'success': {'data': output}}
+            except:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                message = "An error occured after NeuroArch write operation {}, database has been updated".format(method_name)
+                print(message + ":\n" + tb)
+                returnValue({'error': {'message': message,
+                                       'exception': tb}})
+            returnValue(res)
 
-        uri = six.u( 'ffbo.na.add_neuron.%s' % str(details.session) )
-        yield self.register(add_neuron, uri)
+
+        uri = six.u( 'ffbo.na.NeuroArch.write.{}'.format(str(details.session)) )
+        yield self.register(NeuroArchWrite, uri, RegisterOptions(details_arg='details',concurrency=1))
+
+        @inlineCallbacks
+        def NeuroArchQuery(method_name, *args, details = None, **kwargs):
+            user_id = details.caller
+            default_ds = self.user_list.user(
+                                user_id,
+                                self.db_connection)['default_datasource']
+            try:
+                assert method_name in NA_ALLOWED_QUERY_METHODS, 'Operation {} not allowed.'.format(method_name)
+                func = getattr(self.db_connection, method_name)
+                spec = inspect.getfullargspec(func)
+                pass_default = False
+                if 'data_source' in spec.args:
+                    default_length = len(spec.defaults) if spec.defaults is not None else 0
+                    if len(spec.args)-spec.args.index('data_source') <= default_length:
+                        if spec.defaults[-(len(spec.args)-spec.args.index('data_source'))] is None:
+                            if 'data_source' in kwargs and kwargs['data_source'] is None:
+                                pass_default = True
+                if pass_default:
+                    kwargs.pop('data_source')
+                    output = yield threads.deferToThread(
+                        func, *args,
+                        data_source = self.user_list.get_default_datasource(user_id),
+                        **kwargs)
+                else:
+                    output = yield threads.deferToThread(func, *args, **kwargs)
+
+                if issubclass(type(output), models.Node):
+                    res = {'success': {'data': {output._id: output.get_props()}}}
+                elif isinstance(output, list):
+                    res = {'success': {'data': [{n._id: n.get_props()} if issubclass(type(n), models.Node) else n for n in output]}}
+                elif isinstance(output, dict):
+                    res = {'success': {'data': {k: {v._id: v.get_props()} if issubclass(type(v), models.Node) else v for k, v in output.items()}}}
+                elif isinstance(output, QueryWrapper):
+                    nx_graph = output.get_as('nx')
+                    res = {'success': {'data': {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}}}
+                else:
+                    res = {'success': {'data': output}}
+            except Exception as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                message = "An error occured during NeuroArch call {}".format(method_name)
+                print(message + ":\n" + tb)
+                returnValue({'error': {'message': message,
+                                       'exception': tb}})
+            returnValue(res)
+
+        uri = six.u( 'ffbo.na.NeuroArch.query.{}'.format(str(details.session)) )
+        yield self.register(NeuroArchQuery, uri, RegisterOptions(details_arg='details',concurrency=1))
+
+        def select_datasource(name, version = None, details = None):
+            user_id = details.caller
+            default_ds = self.user_list.user(
+                                user_id,
+                                self.db_connection)['default_datasource']
+            obj = self.db_connection._get_obj_from_str(name)
+            if isinstance(obj, models.DataSource):
+                data_source = obj
+            else:
+                try:
+                    datasources = self.db_connection.find_objs('DataSource', name = name, version = version)
+                    if len(datasources) == 1:
+                        data_source = datasources[0]
+                    elif len(datasources) == 0:
+                        return {'error':
+                                    {'message': 'Cannot find DataSource named {name} with version {version}'.format(
+                                            name = name, version = version),
+                                     'exception': ''}}
+                    else:
+                        return {'error':
+                                    {'message': 'Multiple datasources named {name} with version {version} found'.format(
+                                            name = name, version = version),
+                                     'exception': ''}}
+                except Exception as e:
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                    message = "An error occured during 'select_datasource'"
+                    print(message + ":\n" + tb)
+                    return {'error': {'message': message,
+                                           'exception': tb}}
+            self.user_list.set_default_datasource(user_id, data_source)
+            return {'success': {'message': 'Default datasource set'}}
+
+        uri = six.u( 'ffbo.na.datasource.%s' % str(details.session) )
+        yield self.register(select_datasource, uri, RegisterOptions(details_arg='details',concurrency=1))
 
 
         def create_tag(task, details=None):
@@ -1534,6 +1579,9 @@ if __name__ == '__main__':
                         help='name of dataset, default to the same database name')
     parser.add_argument('--port', dest='port', type=int, default=2424,
                         help='binary port of orientdb, default to 2424')
+    parser.add_argument('--mode', dest='mode', type=six.text_type, default='r',
+                        help='database mode (r: read-only, w: writable, o: overwrite - start server by wiping original data in the database), default to "r"')
+
     parser.set_defaults(ssl=ssl)
     parser.set_defaults(debug=debug)
 
@@ -1544,24 +1592,29 @@ if __name__ == '__main__':
     else:
         pw = 'root'
 
+    if args.dataset is None:
+        dataset = args.db
+    else:
+        dataset = args.dataset
+    if args.name is None:
+        name = args.db
+    else:
+        name = args.name
+    if args.mode == 'o':
+        txt = input("Overwrite the {} database? (y/N) ".format(args.db))
+        if txt != 'y':
+            exit(0)
+
     # start logging
     if args.debug:
         txaio.start_logging(level='debug')
     else:
         txaio.start_logging(level='info')
 
-    if args.dataset is None:
-        dataset = args.database
-    else:
-        dataset = args.dataset
-    if args.name is None:
-        name = args.database
-    else:
-        name = args.name
     # any extra info we want to forward to our ClientSession (in self.config.extra)
     extra = {'auth': True, 'database': args.db, 'username': args.user,
              'password': pw, 'port': args.port, 'debug': args.debug,
-             'dataset': dataset, 'name': name}
+             'dataset': dataset, 'name': name, 'mode': args.mode}
 
     if args.ssl:
         st_cert=open(args.ca_cert_file, 'rt').read()
@@ -1575,7 +1628,7 @@ if __name__ == '__main__':
         ssl_con = CertificateOptions(trustRoot=certs)
 
         # now actually run a WAMP client using our session class ClientSession
-        runner = ApplicationRunner(url=args.url, realm=args.realm, extra=extra, ssl=ssl_con)
+        runner = ApplicationRunner(url=args.url, realm=args.realm, extra=extra)
 
     else:
         # now actually run a WAMP client using our session class ClientSession
