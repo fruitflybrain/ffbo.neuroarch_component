@@ -829,7 +829,7 @@ class AppSession(ApplicationSession):
                 else:
                     if details.progress and threshold:
                         for c in res:
-                            details.progress(c)
+                            yield threads.deferToThread(details.progress, c)
                         self.na_query_on_end()
                         returnValue({'info': {'success':'Finished fetching all results from database'}})
                     else:
