@@ -140,6 +140,7 @@ NA_ALLOWED_WRTIE_METHODS = [
     'remove_Neurons',
     'remove_Synapses',
     'remove_Synapses_between',
+    'create_model_from_circuit',
 ]
 
 NA_ALLOWED_QUERY_METHODS = [
@@ -1206,8 +1207,8 @@ class AppSession(ApplicationSession):
                     res = {'success': {'data': {output._id: output.get_props()}}}
                 elif isinstance(output, list):
                     res = {'success': {'data': [{n._id: n.get_props()} if issubclass(type(n), models.Node) else n for n in output]}}
-                elif isinstance(output, dict):
-                    res = {'success': {'data': {k: {v._id: v.get_props()} if issubclass(type(v), models.Node) else v for k, v in output.items()}}}
+                # elif isinstance(output, dict):
+                #     res = {'success': {'data': {k: {v._id: v.get_props()} if issubclass(type(v), models.Node) else v for k, v in output.items()}}}
                 elif isinstance(output, QueryWrapper):
                     nx_graph = output.get_as('nx')
                     res = {'success': {'data': {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}}}
