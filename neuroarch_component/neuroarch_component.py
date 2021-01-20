@@ -708,7 +708,8 @@ class AppSession(ApplicationSession):
         arg_kws = ['color']
 
         reactor.suggestThreadPoolSize(self._max_concurrency*2)
-        verb_translations = {'unhide': 'show',
+        verb_translations = {'hide': 'hide',
+                             'unhide': 'unhide',
                              'color': 'setcolor',
                              'keep' : 'remove',
                              'blink' : 'animate',
