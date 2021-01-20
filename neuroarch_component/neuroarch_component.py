@@ -226,6 +226,8 @@ class neuroarch_server(object):
                     output = user.state[-1]
             else:
                 user.state.pop(-1)
+        elif verb in ['hide', 'unhide', 'pin', 'unpin']:
+            user.state.pop(-1)
         else:
             assert(len(user.state)>=2)
             cmd = {'undo':{'states':1}}
@@ -709,12 +711,14 @@ class AppSession(ApplicationSession):
 
         reactor.suggestThreadPoolSize(self._max_concurrency*2)
         verb_translations = {'hide': 'hide',
-                             'unhide': 'unhide',
+                             'unhide': 'show',
                              'color': 'setcolor',
                              'keep' : 'remove',
                              'blink' : 'animate',
                              'unblink' : 'unanimate',
-                             'remove': 'remove'}
+                             'remove': 'remove',
+                             'pin': 'pin',
+                             'unpin': 'unpin'}
 
         @inlineCallbacks
         def na_query(task,details=None):
