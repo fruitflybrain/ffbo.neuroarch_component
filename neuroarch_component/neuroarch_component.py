@@ -1634,10 +1634,12 @@ if __name__ == '__main__':
         ssl_con = CertificateOptions(trustRoot=certs)
 
         # now actually run a WAMP client using our session class ClientSession
-        runner = ApplicationRunner(url=args.url, realm=args.realm, extra=extra)
+        runner = ApplicationRunner(url = args.url, realm = args.realm,
+                                   extra = extra, ssl = ssl_con)
 
     else:
         # now actually run a WAMP client using our session class ClientSession
-        runner = ApplicationRunner(url=args.url, realm=args.realm, extra=extra)
+        runner = ApplicationRunner(url = args.url, realm = args.realm,
+                                   extra = extra)
 
     runner.run(AppSession, auto_reconnect=True)
