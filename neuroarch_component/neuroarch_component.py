@@ -694,7 +694,9 @@ class AppSession(ApplicationSession):
     def onJoin(self, details):
         self.server_config = {six.u('name'): six.u(self.config.extra['name']),
                               six.u('dataset'): six.u(self.config.extra['dataset']),
-                              six.u('autobahn'): six.u(autobahn.__version__)}
+                              six.u('autobahn'): six.u(autobahn.__version__),
+                              six.u('min_fbl_version'): six.u('0.1.1'),
+                              six.u('max_fbl_version'): six.u('0.1.1')}
         self.db_connection = na.NeuroArch(
                                 self.config.extra['database'],
                                 user = self.config.extra['username'],
