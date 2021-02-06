@@ -15,11 +15,11 @@ from setuptools import find_packages
 from setuptools import setup
 
 NAME =               'neuroarch_component'
-VERSION =            '0.2.0'
-AUTHOR =             'Adam Tomkins'
-AUTHOR_EMAIL =       'a.tomkins@shef.ac.uk'
-MAINTAINER =         AUTHOR
-MAINTAINER_EMAIL =   AUTHOR_EMAIL
+VERSION =            '0.3.0'
+AUTHOR =             'Adam Tomkins, Nikul Ukani, Yiyin Zhou'
+AUTHOR_EMAIL =       'a.tomkins@shef.ac.uk, nikul@ee.columbia.edu, yiyin@ee.columbia.edu'
+MAINTAINER =         'Yiyin Zhou'
+MAINTAINER_EMAIL =   'yiyin@ee.columbia.edu'
 DESCRIPTION =        'A wrapper for a neuroarch to enable rpc communication'
 URL =                'TBD'
 LONG_DESCRIPTION =   DESCRIPTION

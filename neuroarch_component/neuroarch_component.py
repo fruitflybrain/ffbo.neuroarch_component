@@ -40,6 +40,7 @@ from pyorient.serializations import OrientSerialization
 import neuroarch.models as models
 from neuroarch.query import QueryWrapper, QueryString, _list_repr
 import neuroarch.na as na
+from version import __version__, __min_fbl_support__, __max_fbl_support__
 
 # User access
 import state
@@ -695,8 +696,9 @@ class AppSession(ApplicationSession):
         self.server_config = {six.u('name'): six.u(self.config.extra['name']),
                               six.u('dataset'): six.u(self.config.extra['dataset']),
                               six.u('autobahn'): six.u(autobahn.__version__),
-                              six.u('min_fbl_version'): six.u('0.1.1'),
-                              six.u('max_fbl_version'): six.u('0.1.1')}
+                              six.u('min_fbl_version'): six.u(__min_fbl_support__),
+                              six.u('max_fbl_version'): six.u(__max_fbl_support__),
+                              six.u('version'): six.u(__version__)}
         self.db_connection = na.NeuroArch(
                                 self.config.extra['database'],
                                 user = self.config.extra['username'],
