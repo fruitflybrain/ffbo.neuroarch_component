@@ -1430,7 +1430,8 @@ class AppSession(ApplicationSession):
         @inlineCallbacks
         def memory_management():
             clensed_users = yield self.user_list.cleanup()
-            self.log.info("Memory Manager removed users: {users}", users=clensed_users)
+            if len(clensed_users):
+                self.log.info("Memory Manager removed users: {users}", users=clensed_users)
             for user in clensed_users:
                 try:
                     yield self.publish(six.u( "ffbo.ui.update.%s" % user ), "Inactivity Detected, State Memory has been cleared")
