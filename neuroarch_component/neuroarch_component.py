@@ -128,6 +128,7 @@ NA_ALLOWED_WRTIE_METHODS = [
     'add_Neuropil',
     'add_Subsystem',
     'add_Subregion',
+    'add_Circuit',
     'add_Neuron',
     'add_Synapse',
     'add_InferredSynapse',
