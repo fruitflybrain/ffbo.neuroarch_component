@@ -13,6 +13,7 @@ import uuid
 from itertools import islice
 import numbers
 import inspect
+from operator import itemgetter
 
 import six
 import numpy as np
@@ -29,7 +30,6 @@ from autobahn.wamp.serializer import MsgPackObjectSerializer, JsonObjectSerializ
 from autobahn.wamp.types import RegisterOptions
 from autobahn.wamp import auth
 from autobahn.websocket.protocol import WebSocketClientFactory
-from operator import itemgetter
 
 from pyorient.exceptions import PyOrientConnectionException
 from pyorient.ogm import Graph, Config
