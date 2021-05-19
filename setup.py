@@ -66,6 +66,8 @@ if __name__ == "__main__":
             'neuroarch',
             'configparser',
             'pyopenssl',
-            'txaio'
+            'txaio',
+            'msgpack',
+            'msgpack-numpy',
         ],
         )
