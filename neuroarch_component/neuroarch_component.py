@@ -219,7 +219,7 @@ class neuroarch_server(object):
         elif verb == 'remove':
             assert(len(user.state)>=2)
             user.state[-1] = user.state[-2] - output
-        elif verb == 'color':
+        elif verb in ['color', 'hide', 'unhide', 'pin', 'unpin']:
             if isinstance(output, list) and len(output) == 0:
                 user.state.pop(-1)
                 if len(user.state) > 1:
@@ -228,8 +228,6 @@ class neuroarch_server(object):
                     output = user.state[-1]
             else:
                 user.state.pop(-1)
-        elif verb in ['hide', 'unhide', 'pin', 'unpin']:
-            user.state.pop(-1)
         else:
             assert(len(user.state)>=2)
             cmd = {'undo':{'states':1}}
@@ -294,7 +292,7 @@ class neuroarch_server(object):
                             node_ids = [node._id for node in output.nodes_as_objs]
                             nx_graph = output.gen_traversal_out(
                                         ['HasData', 'MorphologyData', 'instanceof'],
-                                        min_depth = 0).get_as(as_type = 'nx', edges = True)
+                                        min_depth = 0).get_as(as_type = 'nx', edges = True, edge_class = 'HasData')
                             if threshold:
                                 chunked_output = []
                                 if threshold == 'auto':

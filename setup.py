@@ -69,5 +69,6 @@ if __name__ == "__main__":
             'txaio',
             'msgpack',
             'msgpack-numpy',
+            'service-identity',
         ],
         )
