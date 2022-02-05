@@ -289,7 +289,8 @@ class neuroarch_server(object):
                             #             if outV['class'] == 'MorphologyData':
                             #                 output[node]['MorphologyData'] = outV
                             #                 output[node]['MorphologyData']['rid'] = d
-                            node_ids = [node._id for node in output.nodes_as_objs]
+                            # node_ids = [node._id for node in output.nodes_as_objs]
+                            node_ids = list(output._nodes.keys())
                             nx_graph = output.gen_traversal_out(
                                         ['HasData', 'MorphologyData', 'instanceof'],
                                         min_depth = 0).get_as(as_type = 'nx', edges = True, edge_class = 'HasData')
@@ -851,7 +852,7 @@ class AppSession(ApplicationSession):
         @inlineCallbacks
         def get_data_sub(q):
             res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-            n_obj = q.nodes_as_objs[0]
+            n_obj = q.get_nodes()[0]
             orid = n_obj._id
             # ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
             # if len(ds):
@@ -1029,7 +1030,7 @@ class AppSession(ApplicationSession):
 
         def get_syn_data_sub(q):
             res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-            synapse = q.nodes_as_objs[0]
+            synapse = q.get_nodes()[0]
             syn_id = synapse._id
             res['orid'] = syn_id
             ds = q.owned_by(cls='DataSource')
@@ -1117,9 +1118,9 @@ class AppSession(ApplicationSession):
                     returnValue({})
                 elem = server.graph.get_element(task['id'])
                 q = QueryWrapper.from_objs(server.graph,[elem], self.na_debug)
-                callback = get_data_sub if elem.element_type == 'Neuron' else get_syn_data_sub
-                if not (elem.element_type == 'Neuron' or elem.element_type == 'Synapse' or elem.element_type=='InferredSynapse'):
-                    qn = q.gen_traversal_in(['HasData','Neuron'],min_depth=1)
+                callback = get_data_sub if elem.element_type in ['Neuron', 'NeuronFragment'] else get_syn_data_sub
+                if not (elem.element_type in ['Neuron', 'NeuronFragment', 'Synapse', 'InferredSynapse']):
+                    qn = q.gen_traversal_in(['HasData', 'NeuronAndFragment', 'instanceof'],min_depth=1)
                     if not qn.nodes:
                         q = q.gen_traversal_in(['HasData',['Synapse', 'InferredSynapse']],min_depth=1)
                         if not q.nodes:
@@ -1142,9 +1143,9 @@ class AppSession(ApplicationSession):
                         returnValue({})
                     elem = server.graph.get_element(task['id'])
                     q = QueryWrapper.from_objs(server.graph,[elem], self.na_debug)
-                    callback = get_data_sub if elem.element_type == 'Neuron' else get_syn_data_sub
-                    if not (elem.element_type == 'Neuron' or elem.element_type == 'Synapse' or elem.element_type=='InferredSynapse'):
-                        qn = q.gen_traversal_in(['HasData','Neuron'],min_depth=1)
+                    callback = get_data_sub if elem.element_type in ['Neuron', 'NeuronFragment'] else get_syn_data_sub
+                    if not (elem.element_type in ['Neuron', 'NeuronFragment', 'Synapse', 'InferredSynapse']):
+                        qn = q.gen_traversal_in(['HasData', 'NeuronAndFragment', 'instanceof'],min_depth=1)
                         if not qn.nodes:
                             q = q.gen_traversal_in(['HasData',['Synapse', 'InferredSynapse']],min_depth=1)
                             if not q.nodes:
