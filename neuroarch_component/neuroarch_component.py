@@ -147,12 +147,14 @@ class neuroarch_server(object):
 
     def __init__(self, db, user = None, debug = False):
         self.db = db
-        self.graph = db.graph
         self.user = user
         self.debug = debug
         print('DEBUG:', debug)
-        self.query_processor = query_processor(self.graph, debug = debug)
-        self._busy = False
+        self.query_processor = query_processor(self.db, debug = debug)
+
+    @property
+    def graph(self):
+        return self.db.graph
 
     def retrieve_neuron(self,nid):
         # WIP: Currently retrieves all information for the get_as method, this will be refined when we know what data we want to store and pull out here
@@ -179,7 +181,7 @@ class neuroarch_server(object):
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             print("An error occured during 'process_query':\n" + tb)
-            return False
+            return e
 
     @staticmethod
     def process_verb(output, user, verb):
@@ -218,10 +220,7 @@ class neuroarch_server(object):
             update the user states, and query neuroarch
             This is the default access route
         """
-        while(self._busy):
-            time.sleep(1)
         try:
-            self._busy = True
             if not type(task) == dict:
                 task = json.loads(task)
             task = byteify(task)
@@ -246,7 +245,6 @@ class neuroarch_server(object):
                             output = output.get_data_rids(cls='MorphologyData')
                         else:
                             output = output._records_to_list(output.nodes)
-                        self._busy = False
                         return (output, True)
 
 
@@ -372,37 +370,34 @@ class neuroarch_server(object):
                             for c in chunks(output, 20):
                                 chunked_output.append(c)
                     output = chunked_output
-                self._busy = False
                 return (output, True)
 
             elif 'query' in task:
                 succ = self.process_query(task)
-                if succ:
+                if succ is True:
                     if query_results:
                         task['command'] = {"retrieve":{"state":0}}
                         output = (None,)
                         try:
-                            self._busy = False
                             output = self.receive_task(task, threshold)
-                            if output[0]==None:
-                                succ=False
+                            if output[0] is None:
+                                succ = False
                         except Exception as e:
                             exc_type, exc_value, exc_traceback = sys.exc_info()
                             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                             print("An error occured during 'query':\n" + tb)
+                            output[0] = e
                             succ = False
-                        self._busy = False
                         if 'temp' in task and task['temp'] and len(user.state)>=2:
                             user.process_command({'undo':{'states':1}})
                         return (output[0], succ)
-                self._busy = False
-                return None, succ
+                else:
+                    return succ, False
         except Exception as e:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             print("An error occured during 'receive_task':\n" + tb)
-            self._busy = False
-            return None, False
+            return e, False
 
     def get_data(self, task):
         try:
@@ -425,7 +420,7 @@ class neuroarch_server(object):
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             print("An error occured during 'get_data':\n" + tb)
-            return (None, False)
+            return (e, False)
     
     def get_data_sub(self, q):
         res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
@@ -662,12 +657,6 @@ class neuroarch_server(object):
             return tagged_result['metadata'], True
         else:
             return None, False
-        
-        #     return {'data':tagged_result['metadata'],
-        #             'info':{'success':'Server Retrieved Tag Succesfully'}}
-        # else:
-        #     return {"info":{"error":
-        #                     "No such tag exists in this database server"}}
 
     def select_datasource(self, task):
         name = task["name"]
@@ -703,11 +692,15 @@ class neuroarch_server(object):
     
 class query_processor():
 
-    def __init__(self, graph, debug = False):
+    def __init__(self, db, debug = False):
         self.class_list = {}
-        self.graph = graph
+        self.db = db
         self.debug = debug
         self.load_class_list()
+
+    @property
+    def graph(self):
+        return self.db.graph
 
     def load_class_list(self):
         # Dynamically build acceptable methods from the registry
@@ -974,6 +967,38 @@ class AppSession(ApplicationSession):
         self._current_concurrency -= 1
         self.log.info('na_query() encountered error ({invocations} invocations, current concurrency {current_concurrency} of max {max_concurrency})', invocations=self._invocations_served, current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency)
 
+    @inlineCallbacks
+    def db_query_on_start(self, user_id, db_id, queryID = ''):
+        if self.db_busy[db_id]:
+            try:
+                msg_uri = 'ffbo.ui.receive_msg.%s' % user_id
+                njobs = self.db_counter[db_id]
+                yield self.call(msg_uri, {'info':{'success':
+                                        'Job queued, wait time is approximately {} seconds'.format(njobs*4),
+                                        'queryID': queryID}})
+            except Exception as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                self.log.error("An error occured while sending queued message to user {}".format(user_id))
+        self.db_counter[db_id] += 1
+    
+    def db_query_on_end(self, user_id, db_id):
+        self.db_counter[db_id] = max(self.db_counter[db_id]-1,0)
+
+    def get_db_id(self, user_id):
+        """
+        Return db_id and db_query rpc uri to use for neuroarch query
+        """
+        if user_id in self.user_list.list:
+            db_id = self.user_list.db_id[user_id]
+        else:
+            db_id = self.next_db_to_use
+            # this is prune to race condition if two na_query are called at the same time.
+            self.next_db_to_use += 1
+            if self.next_db_to_use >= self._num_db_connections:
+                self.next_db_to_use = 0
+        uri = 'ffbo.na.db_query.{}.{}'.format(self.session, db_id)
+        return db_id, uri
 
     @inlineCallbacks
     def onJoin(self, details):
@@ -1013,6 +1038,9 @@ class AppSession(ApplicationSession):
                                     port = self.config.extra['port'],
                                     mode = self.config.extra['mode'])
                                 for i in range(self._num_db_connections)]
+
+        self.db_busy = [False]*self._num_db_connections
+        self.db_counter = [0]*self._num_db_connections
         self.next_db_to_use = 0
 
         arg_kws = ['color']
@@ -1033,6 +1061,7 @@ class AppSession(ApplicationSession):
             """
             This RPC is created to ensure that a single db_connection is called one at a time.
             """
+            self.db_busy[db_id] = True
             db = self.db_connection[db_id]
             server = self.user_list.user(user_id, db, db_id)['server']
             if server.db is not db:
@@ -1041,25 +1070,29 @@ class AppSession(ApplicationSession):
             if query_type == "na_query":
                 (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
                 if not succ:
-                    self.log.info("attempt to restart connection to DB.")
-                    # self.db_connection.reconnect()
-                    server.db.reconnect()
-                    # server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
-                    (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
+                    if isinstance(res, (PyOrientConnectionException, OSError)):
+                        self.log.info("attempt to restart connection to DB.")
+                        # self.db_connection.reconnect()
+                        db.reconnect()
+                        server = self.user_list.user(user_id, db, db_id, force_reconnect = True)['server']
+                        (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
                 if succ:
                     result_id = self.user_list.add_result(user_id, res)
+                    self.db_busy[db_id] = False
                     returnValue([succ, result_id])
                 else:
+                    self.db_busy[db_id] = False
                     returnValue([succ, -1])
             elif query_type == "get_data":
                 (res, succ) = yield threads.deferToThread(server.get_data, task)
 
                 if not succ:
-                    self.log.info("attempt to restart connection to DB.")
-                    # self.db_connection.reconnect()
-                    server.db.reconnect()
-                    # server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
-                    (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
+                    if isinstance(res, (PyOrientConnectionException, OSError)):
+                        self.log.info("attempt to restart connection to DB.")
+                        # self.db_connection.reconnect()
+                        db.reconnect()
+                        server = self.user_list.user(user_id, db, db_id, force_reconnect = True)['server']
+                        (res, succ) = yield threads.deferToThread(server.get_data, task)
                 
                 if succ:
                     if 'FlyCircuit' in res['data']['summary']['data_source']:
@@ -1069,8 +1102,10 @@ class AppSession(ApplicationSession):
                         except:
                             pass
                     result_id = self.user_list.add_result(user_id, res)
+                    self.db_busy[db_id] = False
                     returnValue([succ, result_id])
                 else:
+                    self.db_busy[db_id] = False
                     returnValue([succ, -1])
             elif query_type == "create_tag":
                 (output, succ) = yield threads.deferToThread(server.receive_task, {"command":{"retrieve":{"state":0}},"format":"qw"})
@@ -1084,21 +1119,26 @@ class AppSession(ApplicationSession):
                         result = output.tag_query_result_node(tag=task['tag'],
                                                             permanent_flag=True)
                     if result == -1:
+                        self.db_busy[db_id] = False
                         returnValue({"info":{"error":"The tag already exists. Please choose a different one"}})
                     else:
+                        self.db_busy[db_id] = False
                         returnValue({"info":{"success":"tag created successfully"}})
 
                 else:
+                    self.db_busy[db_id] = False
                     returnValue({"info":{"error":
                                     "No data found in current workspace to create tag"}})
             elif query_type == "retrieve_tag":
                 output, succ = yield threads.deferToThread(server.retrieve_tag, task)
                 result_id = self.user_list.add_result(user_id, output)
+                self.db_busy[db_id] = False
                 returnValue([succ, result_id])
             elif query_type == "select_datasource":
                 data_source, succ = yield threads.deferToThread(server.select_datasource, task)
                 if data_source is not None:
                     self.user_list.set_default_datasource(user_id, data_source)
+                self.db_busy[db_id] = False
                 returnValue(succ)
             elif query_type in ['NeuroArchWrite', 'NeuroArchQuery']:
                 try:
@@ -1144,33 +1184,20 @@ class AppSession(ApplicationSession):
                         data = output
 
                     result_id = self.user_list.add_result(user_id, data)
+                    self.db_busy[db_id] = False
                     returnValue([True, result_id])
                 
                 except Exception as e:
                     exc_type, exc_value, exc_traceback = sys.exc_info()
                     tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                     self.log.error("An error occured executing {} in NeuroArchWrite call:\n".format(method_name) + tb)
+                    self.db_busy[db_id] = False
                     returnValue([False, tb])
 
         for i in range(self._num_db_connections):
             uri = six.u( 'ffbo.na.db_query.{}.{}'.format(details.session, i) )
             yield self.register(db_query, uri, RegisterOptions(concurrency=1))
         
-        def get_db_id(user_id):
-            """
-            Return db_id and db_query rpc uri to use for neuroarch query
-            """
-            if user_id in self.user_list.list:
-                db_id = self.user_list.db_id[user_id]
-            else:
-                db_id = self.next_db_to_use
-                # this is prune to race condition if two na_query are called at the same time.
-                self.next_db_to_use += 1
-                if self.next_db_to_use >= self._num_db_connections:
-                    self.next_db_to_use = 0
-            uri = 'ffbo.na.db_query.{}.{}'.format(self.session, db_id)
-            return db_id, uri
-
         @inlineCallbacks
         def na_query(task,details=None):
             self._invocations_served += 1
@@ -1180,42 +1207,35 @@ class AppSession(ApplicationSession):
                 task = json.loads(task)
             task = byteify(task)
 
-            user_id = task['user'] if (details.caller_authrole == 'processor' and 'user' in task) \
-                      else details.caller
-
-            if not 'format' in task: task['format'] = 'morphology'
-            threshold = None
-            if details.progress:
-                threshold = task['threshold'] if 'threshold' in task else 20
-            if 'verb' in task and task['verb'] not in ['add','show']: threshold=None
-            if task['format'] not in ['morphology', 'nx']: threshold=None
-
-            self.log.info("na_query() called with task: {task} ,(current concurrency {current_concurrency} of max {max_concurrency})", current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency, task=task)
-            
-            db_id, uri = get_db_id(user_id)
-            self.log.info("Calling db_query with type na_query, user: {}, db: {}".format(user_id, db_id))
-            succ, result_id = yield self.call(uri, 'na_query', user_id, db_id, task, threshold)
-            if succ:
-                res = self.user_list.get_result(user_id, result_id)
-            # server = self.user_list.user(
-            #                     user_id,
-            #                     self.db_connection)['server']
-            # (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
-            
-
-            # if not succ:
-            #     print("attempt to restart connection to DB.")
-            #     # self.db_connection.reconnect()
-            #     server.db.reconnect()
-            #     server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
-            #     (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
-
-            uri = 'ffbo.ui.receive_msg.%s' % user_id
-            if not(type(uri)==six.text_type): uri = six.u(uri)
-            cmd_uri = 'ffbo.ui.receive_cmd.%s' % user_id
-            if not(type(cmd_uri)==six.text_type): cmd_uri = six.u(cmd_uri)
-
             try:
+                user_id = task['user'] if (details.caller_authrole == 'processor' and 'user' in task) \
+                        else details.caller
+
+                if not 'format' in task: task['format'] = 'morphology'
+                threshold = None
+                if details.progress:
+                    threshold = task['threshold'] if 'threshold' in task else 20
+                if 'verb' in task and task['verb'] not in ['add','show']: threshold=None
+                if task['format'] not in ['morphology', 'nx']: threshold=None
+
+                self.log.info("na_query() called with task: {task} ,(current concurrency {current_concurrency} of max {max_concurrency})", current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency, task=task)
+                
+                db_id, uri = self.get_db_id(user_id)
+                self.db_query_on_start(user_id, db_id, queryID = task.get('queryID', ''))
+
+                self.log.info("Calling db_query with type na_query, user: {}, db: {}".format(user_id, db_id))
+                succ, result_id = yield self.call(uri, 'na_query', user_id, db_id, task, threshold)
+                if succ:
+                    res = self.user_list.get_result(user_id, result_id)
+
+                self.db_query_on_end(user_id, db_id)
+
+                uri = 'ffbo.ui.receive_msg.%s' % user_id
+                if not(type(uri)==six.text_type): uri = six.u(uri)
+                cmd_uri = 'ffbo.ui.receive_cmd.%s' % user_id
+                if not(type(cmd_uri)==six.text_type): cmd_uri = six.u(cmd_uri)
+
+            
                 if succ:
                     yield self.call(uri, {'info':{'success':
                                                   'Fetching results from NeuroArch',
@@ -1280,26 +1300,35 @@ class AppSession(ApplicationSession):
                 self.na_query_on_end()
                 returnValue({'info':{'success':'Finished processing command'}})
             else:
-                if ('data_callback_uri' in task and 'queryID' in task):
-                    if threshold:
-                        for c in res:
+                try:
+                    if ('data_callback_uri' in task and 'queryID' in task):
+                        if threshold:
+                            for c in res:
+                                yield self.call(six.u(task['data_callback_uri'] + '.%s' % details.caller),
+                                                {'data': c, 'queryID': task['queryID']})
+                        else:
                             yield self.call(six.u(task['data_callback_uri'] + '.%s' % details.caller),
-                                            {'data': c, 'queryID': task['queryID']})
-                    else:
-                        yield self.call(six.u(task['data_callback_uri'] + '.%s' % details.caller),
-                                            {'data': res, 'queryID': task['queryID']})
-                    self.na_query_on_end()
-                    returnValue({'info': {'success':'Finished fetching all results from database'}})
-                else:
-                    if details.progress and threshold:
-                        for c in res:
-                            yield threads.deferToThread(details.progress, c)
+                                                {'data': res, 'queryID': task['queryID']})
                         self.na_query_on_end()
                         returnValue({'info': {'success':'Finished fetching all results from database'}})
                     else:
-                        self.na_query_on_end()
-                        returnValue({'info': {'success':'Finished fetching all results from database'},
-                                     'data': res})
+                        if details.progress and threshold:
+                            for c in res:
+                                yield threads.deferToThread(details.progress, c)
+                            self.na_query_on_end()
+                            returnValue({'info': {'success':'Finished fetching all results from database'}})
+                        else:
+                            self.na_query_on_end()
+                            returnValue({'info': {'success':'Finished fetching all results from database'},
+                                        'data': res})
+                except Exception as e:
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                    self.log.error("An error occured during 'verb_translation':\n" + tb)
+                    self.na_query_on_end()
+                    returnValue({'info':{'error':
+                                        'Error sending back data.'}})
+
         uri = six.u( 'ffbo.na.query.%s' % str(details.session) )
         yield self.register(na_query, uri, RegisterOptions(details_arg='details',concurrency=self._max_concurrency))
 
@@ -1324,13 +1353,17 @@ class AppSession(ApplicationSession):
             if not is_rid(task['id']):
                 returnValue({})
 
-            db_id, uri = get_db_id(user_id)
+            db_id, uri = self.get_db_id(user_id)
+            self.db_query_on_start(user_id, db_id, task.get('queryID', ''))
             self.log.info("Calling db_query with type get_data, user: {}, db: {}".format(user_id, db_id))
             succ, result_id = yield self.call(uri, 'get_data', user_id, db_id, task, threshold)
+            
             if succ:
+                self.db_query_on_end(user_id, db_id)
                 res = self.user_list.get_result(user_id, result_id)
                 returnValue(res)
             else:
+                self.db_query_on_end(user_id, db_id)
                 returnValue({'info':{'error':
                                      'Error retrieving data on NeuroArch'}})
 
@@ -1347,15 +1380,20 @@ class AppSession(ApplicationSession):
                                        'exception': 'Database is not writeable'}})
             assert method_name in NA_ALLOWED_WRTIE_METHODS, 'Operation {} not allowed.'.format(method_name)
             user_id = details.caller
+            started = False
             try: 
-                db_id, uri = get_db_id(user_id)
+                db_id, uri = self.get_db_id(user_id)
                 task = {'args': args, 'kwargs': kwargs, 'method': method_name}
                 self.log.info("Calling db_query with type NeuroArchWrite, user: {}, db: {}".format(user_id, db_id))
+                self.db_query_on_start(user_id, db_id)
+                started = True
                 succ, result_id = yield self.call(uri, 'NeuroArchWrite', user_id, db_id, task, None)
 
                 if succ:
+                    self.db_query_on_end(user_id, db_id)
                     output = self.user_list.get_result(user_id, result_id)
                 else:
+                    self.db_query_on_end(user_id, db_id)
                     returnValue({'error': {'message': 'Error executing NeuroArchWrite request',
                                  'exception': result_id}})
                 returnValue({'success': {'data': output}})
@@ -1364,6 +1402,8 @@ class AppSession(ApplicationSession):
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 message = "An error occured during NeuroArch call {}".format(method_name)
                 self.log.error(message + ":\n" + tb)
+                if started:
+                    self.db_query_on_end(user_id, db_id)
                 returnValue({'error': {'message': message,
                                        'exception': tb}})
 
@@ -1374,16 +1414,20 @@ class AppSession(ApplicationSession):
         def NeuroArchQuery(method_name, *args, details = None, **kwargs):
             user_id = details.caller
             assert method_name in NA_ALLOWED_QUERY_METHODS, 'Operation {} not allowed.'.format(method_name)
-
+            started = False
             try: 
-                db_id, uri = get_db_id(user_id)
+                db_id, uri = self.get_db_id(user_id)
                 task = {'args': args, 'kwargs': kwargs, 'method': method_name}
                 self.log.info("Calling db_query with type NeuroArchQuery, user: {}, db: {}".format(user_id, db_id))
+                self.db_query_on_start(user_id, db_id)
+                started = True
                 succ, result_id = yield self.call(uri, 'NeuroArchQuery', user_id, db_id, task, None)
 
                 if succ:
+                    self.db_query_on_end(user_id, db_id)
                     data = self.user_list.get_result(user_id, result_id)
                 else:
+                    self.db_query_on_end(user_id, db_id)
                     message = "An error occured during NeuroArch call {}".format(method_name)
                     returnValue({'error': {'message': message,
                                           'exception': result_id}})
@@ -1393,6 +1437,8 @@ class AppSession(ApplicationSession):
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 message = "An error occured during NeuroArch call {}".format(method_name)
                 self.log.error(message + ":\n" + tb)
+                if started:
+                    self.db_query_on_end(user_id, db_id)
                 returnValue({'error': {'message': message,
                                        'exception': tb}})
 
@@ -1402,11 +1448,13 @@ class AppSession(ApplicationSession):
         @inlineCallbacks
         def select_datasource(name, version = None, details = None):
             user_id = details.caller
-            db_id, uri = get_db_id(user_id)
+            db_id, uri = self.get_db_id(user_id)
             self.log.info("Calling db_query with type select_datasource, user: {}, db: {}".format(user_id, db_id))
+            self.db_query_on_start(user_id, db_id)
             succ = yield self.call(uri, 'select_datasource', user_id, db_id,
                                    {"name": name, "version": version},
                                    None)
+            self.db_query_on_end(user_id, db_id)
             returnValue(succ)
 
         uri = six.u( 'ffbo.na.datasource.%s' % str(details.session) )
@@ -1433,9 +1481,11 @@ class AppSession(ApplicationSession):
                       else details.caller
             self.log.info("create_tag() called with task: {task} ",task=task)
 
-            db_id, uri = get_db_id(user_id)
+            db_id, uri = self.get_db_id(user_id)
             self.log.info("Calling db_query with type create_tag, user: {}, db: {}".format(user_id, db_id))
+            self.db_query_on_start(user_id, db_id)
             res = yield self.call(uri, 'create_tag', user_id, db_id, task, None)
+            self.db_query_on_end(user_id, db_id)
             returnValue(res)
 
         uri = six.u( 'ffbo.na.create_tag.%s' % str(details.session) )
@@ -1455,14 +1505,17 @@ class AppSession(ApplicationSession):
                       else details.caller
             self.log.info("retrieve_tag() called with task: {task} ",task=task)
 
-            db_id, uri = get_db_id(user_id)
+            db_id, uri = self.get_db_id(user_id)
             self.log.info("Calling db_query with type retrieve_tag, user: {}, db: {}".format(user_id, db_id))
+            self.db_query_on_start(user_id, db_id)
             succ, result_id = yield self.call(uri, 'retrieve_tag', user_id, db_id, task, None)
             if succ:
+                self.db_query_on_end(user_id, db_id)
                 res = self.user_list.get_result(user_id, result_id)
                 returnValue({'data':res,
                              'info':{'success':'Server Retrieved Tag Succesfully'}})
             else:
+                self.db_query_on_end(user_id, db_id)
                 returnValue({"info":{"error":
                                     "No such tag exists in this database server"}})
 
