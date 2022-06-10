@@ -7,13 +7,11 @@ import argparse
 from collections import Counter
 import time
 import txaio
-from math import isnan
 from configparser import ConfigParser
-import uuid
 from itertools import islice
 import numbers
 import inspect
-from operator import itemgetter
+from uuid import uuid1
 
 import six
 import numpy as np
@@ -22,19 +20,14 @@ from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.logger import Logger
 
 import autobahn
-from autobahn.twisted.util import sleep
 from autobahn.twisted.wamp import ApplicationSession, ApplicationRunner
 from twisted.internet import reactor, threads
 from autobahn.wamp.exception import ApplicationError
-from autobahn.wamp.serializer import MsgPackObjectSerializer, JsonObjectSerializer, JsonSerializer
 from autobahn.wamp.types import RegisterOptions
 from autobahn.wamp import auth
-from autobahn.websocket.protocol import WebSocketClientFactory
 
 from pyorient.exceptions import PyOrientConnectionException
-from pyorient.ogm import Graph, Config
 import pyorient.ogm.graph
-from pyorient.serializations import OrientSerialization
 
 # from neuroarch.models import *
 import neuroarch.models as models
@@ -149,33 +142,19 @@ NA_ALLOWED_QUERY_METHODS = [
     'available_DataSources'
 ]
 
-
-# class graph_connection(object):
-#     def __init__(self, database='na_server', username='root', password='root'):
-#         try:
-#             self.graph = Graph(Config('localhost', 2424,
-#                                       username, password, database, 'plocal',
-#                                       initial_drop=False,
-#                                       serialization_type=OrientSerialization.Binary))
-#
-#         except:
-#             #print "WARNING: Serialisation flag ignored"
-#             self.graph = Graph(Config('localhost', 2424,
-#                                       username, password, database, 'plocal',
-#                                       initial_drop=False))
-#         self.graph.include(models.Node.registry)
-#         self.graph.include(models.Relationship.registry)
-
 class neuroarch_server(object):
     """ Methods to process neuroarch json tasks """
 
     def __init__(self, db, user = None, debug = False):
-        self.graph = db.graph
+        self.db = db
         self.user = user
         self.debug = debug
         print('DEBUG:', debug)
-        self.query_processor = query_processor(self.graph, debug = debug)
-        self._busy = False
+        self.query_processor = query_processor(self.db, debug = debug)
+
+    @property
+    def graph(self):
+        return self.db.graph
 
     def retrieve_neuron(self,nid):
         # WIP: Currently retrieves all information for the get_as method, this will be refined when we know what data we want to store and pull out here
@@ -202,7 +181,7 @@ class neuroarch_server(object):
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             print("An error occured during 'process_query':\n" + tb)
-            return False
+            return e
 
     @staticmethod
     def process_verb(output, user, verb):
@@ -241,10 +220,7 @@ class neuroarch_server(object):
             update the user states, and query neuroarch
             This is the default access route
         """
-        while(self._busy):
-            time.sleep(1)
         try:
-            self._busy = True
             if not type(task) == dict:
                 task = json.loads(task)
             task = byteify(task)
@@ -269,7 +245,6 @@ class neuroarch_server(object):
                             output = output.get_data_rids(cls='MorphologyData')
                         else:
                             output = output._records_to_list(output.nodes)
-                        self._busy = False
                         return (output, True)
 
 
@@ -289,7 +264,6 @@ class neuroarch_server(object):
                             #             if outV['class'] == 'MorphologyData':
                             #                 output[node]['MorphologyData'] = outV
                             #                 output[node]['MorphologyData']['rid'] = d
-                            # node_ids = [node._id for node in output.nodes_as_objs]
                             node_ids = list(output._nodes.keys())
                             nx_graph = output.gen_traversal_out(
                                         ['HasData', 'MorphologyData', 'instanceof'],
@@ -396,46 +370,335 @@ class neuroarch_server(object):
                             for c in chunks(output, 20):
                                 chunked_output.append(c)
                     output = chunked_output
-                self._busy = False
                 return (output, True)
 
             elif 'query' in task:
                 succ = self.process_query(task)
-                if succ:
+                if succ is True:
                     if query_results:
                         task['command'] = {"retrieve":{"state":0}}
                         output = (None,)
                         try:
-                            self._busy = False
                             output = self.receive_task(task, threshold)
-                            if output[0]==None:
-                                succ=False
+                            if output[0] is None:
+                                succ = False
                         except Exception as e:
                             exc_type, exc_value, exc_traceback = sys.exc_info()
                             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                             print("An error occured during 'query':\n" + tb)
+                            output[0] = e
                             succ = False
-                        self._busy = False
                         if 'temp' in task and task['temp'] and len(user.state)>=2:
                             user.process_command({'undo':{'states':1}})
                         return (output[0], succ)
-                self._busy = False
-                return None, succ
+                else:
+                    return succ, False
         except Exception as e:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
             print("An error occured during 'receive_task':\n" + tb)
-            self._busy = False
+            return e, False
+
+    def get_data(self, task):
+        try:
+            elem = self.graph.get_element(task['id'])
+            q = QueryWrapper.from_objs(self.graph, [elem], self.debug)
+            callback = self.get_data_sub if elem.element_type in ['Neuron', 'NeuronFragment'] else self.get_syn_data_sub
+            if not (elem.element_type in ['Neuron', 'NeuronFragment', 'Synapse', 'InferredSynapse']):
+                qn = q.gen_traversal_in(['HasData', 'NeuronAndFragment', 'instanceof'],min_depth=1)
+                if not qn.nodes:
+                    q = q.gen_traversal_in(['HasData',['Synapse', 'InferredSynapse']],min_depth=1)
+                    if not q.nodes:
+                        raise ValueError('Did not find the Synapse node')
+                else:
+                    q = qn
+                    callback = self.get_data_sub
+            #res = yield threads.deferToThread(get_data_sub, q)
+            res = callback(q)
+            return (res, True)
+        except Exception as e:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            print("An error occured during 'get_data':\n" + tb)
+            return (e, False)
+    
+    def get_data_sub(self, q):
+        res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
+        n_obj = q.nodes_as_objs[0]
+        orid = n_obj._id
+        ds = q.owned_by(cls='DataSource')
+        if ds.nodes:
+            res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
+        else:
+            ds = q.get_data_qw().owned_by(cls='DataSource')
+            if ds.nodes:
+                res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
+            else:
+                res['data_source'] = {'Unknown': ''}
+
+        subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx',edges=False,deepcopy=False).nodes
+        ignore = ['name','uname','label','class']
+        key_map = {'Transmitters': 'transmitters'}#'transgenic_lines': 'Transgenic Lines'}
+        for x in subdata.values():
+            up_data = {(key_map[k] if k in key_map else k ):x[k] for k in x if k not in ignore}
+            res.update(up_data)
+
+        res['orid'] = orid
+        try:
+            res['info'] = n_obj.info;
+        except:
+            res['info'] = {}
+        res = {'summary': res}
+        
+        arborization_data = q.get_data(cls='ArborizationData', as_type='nx',edges=False,deepcopy=False).nodes
+        ignore = ['name','uname','label','class']
+        up_data = {}
+
+        for x in arborization_data.values():
+            key_map = {k:k for k in x}
+            if 'FlyCircuit' in res['summary']['data_source']:
+                key_map['dendrites'] = 'inferred_dendritic_segments'
+                key_map['axons'] = 'inferred_axonal_segments'
+            else:
+                key_map['dendrites'] = 'input_synapses'
+                key_map['axons'] = 'output_synapses'
+            up_data.update({key_map[k]:x[k] for k in x if k not in ignore})
+        if up_data: res['summary']['arborization_data'] = up_data
+
+        post_syn=q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
+        pre_syn=q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
+
+        post_data = []
+        if self.debug:
+            start = time.time()
+        if len(post_syn.nodes):
+            post_syn_dict = {}
+            synapses = post_syn.get_as('nx', edges=False, deepcopy = False)
+            synapse_rids = ','.join(list(synapses.nodes()))
+            n_rec=self.graph.client.command("SELECT $path from (traverse out('SendsTo') FROM [{}] maxdepth 1)".format(synapse_rids))
+            ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
+            neuron_rids = list(set(ntos.keys()))
+            neurons = QueryWrapper.from_rids(self.graph, *neuron_rids, debug = self.debug).get_as('nx', edges=False, deepcopy=False)
+
+            post_rids = ','.join(list(neurons.nodes()))
+            post_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(post_rids,synapse_rids)
+            post_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in self.graph.client.command(post_map_command)] if len(n)==2}
+
+            post_data = []
+            for neu_id, syn_id in ntos.items():
+                info = {'has_morph': 0, 'has_syn_morph': 0}
+                info['number'] = synapses.nodes[syn_id].get('N', 1)
+                info['n_rid'] = neu_id
+                info['s_rid'] = syn_id
+                if neu_id in post_map_l:
+                    info['has_morph'] = 1
+                    info['rid'] = post_map_l[neu_id]
+                if syn_id in post_map_l:
+                    info['has_syn_morph'] = 1
+                    info['syn_rid'] = post_map_l[syn_id]
+                    if 'uname' in synapses.nodes[syn_id]:
+                        info['syn_uname'] = synapses.nodes[syn_id]['uname']
+                info['inferred'] = (synapses.nodes[syn_id]['class'] == 'InferredSynapse')
+                info.update(neurons.nodes[neu_id])
+                post_data.append(info)
+            post_data = sorted(post_data, key=lambda x: x['number'])
+
+        pre_data = []
+        if len(pre_syn.nodes):
+            pre_syn_dict = {}
+            synapses = pre_syn.get_as('nx', edges=False, deepcopy = False)
+            synapse_rids = ','.join(list(synapses.nodes()))
+            n_rec=self.graph.client.command("""SELECT $path from (traverse in('SendsTo') FROM [{}] maxdepth 1)""".format(synapse_rids))
+            ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
+            neuron_rids = list(set(ntos.keys()))
+            neurons = QueryWrapper.from_rids(self.graph, *neuron_rids, debug = self.debug).get_as('nx', edges=False, deepcopy=False)
+
+            pre_rids = ','.join(list(neurons.nodes()))
+            pre_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(pre_rids, synapse_rids)
+            pre_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in self.graph.client.command(pre_map_command)] if len(n)==2}
+
+            for neu_id, syn_id in ntos.items():
+                info = {'has_morph': 0, 'has_syn_morph': 0}
+                info['number'] = synapses.nodes[syn_id].get('N', 1)
+                info['n_rid'] = neu_id
+                info['s_rid'] = syn_id
+                if neu_id in pre_map_l:
+                    info['has_morph'] = 1
+                    info['rid'] = pre_map_l[neu_id]
+                if syn_id in pre_map_l:
+                    info['has_syn_morph'] = 1
+                    info['syn_rid'] = pre_map_l[syn_id]
+                    if 'uname' in synapses.nodes[syn_id]:
+                        info['syn_uname'] = synapses.nodes[syn_id]['uname']
+                info['inferred'] = (synapses.nodes[syn_id]['class'] == 'InferredSynapse')
+                info.update(neurons.nodes[neu_id])
+                pre_data.append(info)
+            pre_data = sorted(pre_data, key=lambda x: x['number'])
+
+            # Summary PreSyn Information
+            pre_sum = {}
+            for x in pre_data:
+                cls = x['name'].split('-')[0]
+                try:
+                    if cls=='5': cls = x['name'].split('-')[:2].join('-')
+                except Exception as e:
+                    pass
+                if cls in pre_sum: pre_sum[cls] += x['number']
+                else: pre_sum[cls] = x['number']
+            pre_N =  np.sum(list(pre_sum.values()))
+            pre_sum = {k: 100*float(v)/pre_N for (k,v) in pre_sum.items()}
+
+            # Summary PostSyn Information
+            post_sum = {}
+            for x in post_data:
+                cls = x['name'].split('-')[0]
+                if cls in post_sum: post_sum[cls] += x['number']
+                else: post_sum[cls] = x['number']
+            post_N =  np.sum(list(post_sum.values()))
+            post_sum = {k: 100*float(v)/post_N for (k,v) in post_sum.items()}
+
+            res.update({
+                'connectivity':{
+                    'post': {
+                        'details': post_data,
+                        'summary': {
+                            'number': int(post_N),
+                            'profile': post_sum
+                        }
+                    }, 'pre': {
+                        'details': pre_data,
+                        'summary': {
+                            'number': int(pre_N),
+                            'profile': pre_sum
+                        }
+                    }
+                }
+            })
+        if self.debug:
+            print("Finished 'get_data connectivity' in", time.time()-start)
+        return {'data':res}
+
+        # returnValue({'data':res})
+
+    def get_syn_data_sub(self, q):
+        res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
+        synapse = q.nodes_as_objs[0]
+        syn_id = synapse._id
+        res['orid'] = syn_id
+        ds = q.owned_by(cls='DataSource')
+        if ds.nodes:
+            res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
+        else:
+            ds = q.get_data_qw().owned_by(cls='DataSource')
+            if ds.nodes:
+                res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
+            else:
+                res['data_source'] = {'Unknown': ''}
+
+        subdata = q.get_data(cls = ['NeurotransmitterData', 'GeneticData', 'MorphologyData'],
+                                as_type = 'nx', edges = False, deepcopy = False).nodes
+        ignore = ['name','uname','label','class', 'x', 'y', 'z', 'r', 'parent', 'identifier', 'sample', 'morph_type', 'confidence']
+        key_map = {'Transmitters': 'transmitters', 'N': 'number'}#'transgenic_lines': 'Transgenic Lines'}
+        for x in subdata.values():
+            up_data = {(key_map[k] if k in key_map else k ):x[k] for k in x if k not in ignore}
+            res.update(up_data)
+        for x in list(res.keys()):
+            if x in key_map:
+                res[key_map[x]] = res.pop(x)
+        if 'region' in res:
+            res['synapse_locations'] = Counter(res.pop('region'))
+
+        post_neuron = synapse.out('SendsTo')[0]
+        pre_neuron = synapse.in_('SendsTo')[0]
+
+        post_neuron_morph = [n for n in post_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
+        pre_neuron_morph = [n for n in pre_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
+
+        post_data = []
+        neu_id = post_neuron._id
+        post_neuron = QueryWrapper.from_rids(self.graph, neu_id, debug = self.debug).get_as('nx', edges=False, deepcopy=False)
+        info = {'has_morph': 0, 'has_syn_morph': 0}
+        info['number'] = getattr(synapse, 'N', 1)
+        info['n_rid'] = neu_id
+        if len(post_neuron_morph):
+            info['has_morph'] = 1
+            info['rid'] = post_neuron_morph[0]._id
+        info.update(post_neuron.nodes[neu_id])
+        post_data.append(info)
+
+        pre_data = []
+        neu_id = pre_neuron._id
+        pre_neuron = QueryWrapper.from_rids(self.graph, neu_id, debug = self.debug).get_as('nx', edges=False, deepcopy=False)
+        info = {'has_morph': 0, 'has_syn_morph': 0}
+        info['number'] = getattr(synapse, 'N', 1)
+        info['n_rid'] = neu_id
+        if len(pre_neuron_morph):
+            info['has_morph'] = 1
+            info['rid'] = pre_neuron_morph[0]._id
+        info.update(pre_neuron.nodes[neu_id])
+        pre_data.append(info)
+
+        res = {'data':{'summary': res,
+                        'connectivity':{
+                            'post': {
+                                'details': post_data,
+                            }, 'pre': {
+                                'details': pre_data,
+                            }}
+                }}
+        return res
+
+    def retrieve_tag(self, task):
+        tagged_result = QueryWrapper.from_tag(self.graph, tag=task['tag'], debug = self.debug)
+        if tagged_result and tagged_result['metadata'] and tagged_result['metadata']!='{}':
+            self.user.append(tagged_result['qw'])
+            return tagged_result['metadata'], True
+        else:
             return None, False
 
+    def select_datasource(self, task):
+        name = task["name"]
+        version = task["version"]
+        obj = self.db._get_obj_from_str(name)
+        if isinstance(obj, models.DataSource):
+            data_source = obj
+        else:
+            try:
+                datasources = self.db.find_objs('DataSource', name = name, version = version)
+                if len(datasources) == 1:
+                    data_source = datasources[0]
+                elif len(datasources) == 0:
+                    return (None, {'error':
+                                {'message': 'Cannot find DataSource named {name} with version {version}'.format(
+                                        name = name, version = version),
+                                    'exception': ''}})
+                else:
+                    return (None, {'error':
+                                {'message': 'Multiple datasources named {name} with version {version} found'.format(
+                                        name = name, version = version),
+                                    'exception': ''}})
+            except Exception as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                message = "An error occured during 'select_datasource'"
+                print(message + ":\n" + tb)
+                return (None, {'error': {'message': message,
+                                        'exception': tb}})
+        
+        return (data_source, {'success': {'message': 'Default datasource set'}})
 
+    
 class query_processor():
 
-    def __init__(self, graph, debug = False):
+    def __init__(self, db, debug = False):
         self.class_list = {}
-        self.graph = graph
+        self.db = db
         self.debug = debug
         self.load_class_list()
+
+    @property
+    def graph(self):
+        return self.db.graph
 
     def load_class_list(self):
         # Dynamically build acceptable methods from the registry
@@ -609,14 +872,17 @@ class user_list():
         self.list = {}
         self.state_limit = state_limit
         self.debug = debug
-        pass
+        self.db_id = {}
+        self.results = {}
 
-    def user(self, user_id, db, force_reconnect = False):
+    def user(self, user_id, db, db_id, force_reconnect = False):
         if user_id not in self.list:
             st = state.State(user_id)
             self.list[user_id] = {'state': st,
                                   'server': neuroarch_server(db, user = st, debug = self.debug),
                                   'default_datasource': None}
+            self.db_id[user_id] = db_id
+            self.results[user_id] = {}
         else:
             if force_reconnect:
                 st = self.list[user_id]['state']
@@ -625,7 +891,16 @@ class user_list():
                                       'server': neuroarch_server(
                                             db, user = st, debug = self.debug),
                                       'default_datasource': ds}
+                self.db_id[user_id] = db_id
         return self.list[user_id]
+
+    def add_result(self, user_id, res):
+        new_id = str(uuid1())
+        self.results[user_id][new_id] = res
+        return new_id
+
+    def get_result(self, user_id, result_id):
+        return self.results[user_id].pop(result_id, None)
 
     def cleanup(self):
         cleansed = []
@@ -690,26 +965,81 @@ class AppSession(ApplicationSession):
         self._current_concurrency -= 1
         self.log.info('na_query() encountered error ({invocations} invocations, current concurrency {current_concurrency} of max {max_concurrency})', invocations=self._invocations_served, current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency)
 
+    @inlineCallbacks
+    def db_query_on_start(self, user_id, db_id, queryID = ''):
+        if self.db_busy[db_id]:
+            try:
+                msg_uri = 'ffbo.ui.receive_msg.%s' % user_id
+                njobs = self.db_counter[db_id]
+                yield self.call(msg_uri, {'info':{'success':
+                                        'Job queued, wait time is approximately {} seconds'.format(njobs*4),
+                                        'queryID': queryID}})
+            except Exception as e:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                self.log.error("An error occured while sending queued message to user {}".format(user_id))
+        self.db_counter[db_id] += 1
+    
+    def db_query_on_end(self, user_id, db_id):
+        self.db_counter[db_id] = max(self.db_counter[db_id]-1,0)
+
+    def get_db_id(self, user_id):
+        """
+        Return db_id and db_query rpc uri to use for neuroarch query
+        """
+        if user_id in self.user_list.list:
+            db_id = self.user_list.db_id[user_id]
+        else:
+            db_id = self.next_db_to_use
+            # this is prune to race condition if two na_query are called at the same time.
+            self.next_db_to_use += 1
+            if self.next_db_to_use >= self._num_db_connections:
+                self.next_db_to_use = 0
+        uri = 'ffbo.na.db_query.{}.{}'.format(self.session, db_id)
+        return db_id, uri
 
     @inlineCallbacks
     def onJoin(self, details):
+        self.session = details.session
         self.server_config = {six.u('name'): six.u(self.config.extra['name']),
                               six.u('dataset'): six.u(self.config.extra['dataset']),
                               six.u('autobahn'): six.u(autobahn.__version__),
                               six.u('min_fbl_version'): six.u(__min_fbl_support__),
                               six.u('max_fbl_version'): six.u(__max_fbl_support__),
                               six.u('version'): six.u(__version__)}
-        self.db_connection = na.NeuroArch(
-                                self.config.extra['database'],
-                                user = self.config.extra['username'],
-                                password = self.config.extra['password'],
-                                port = self.config.extra['port'],
-                                mode = self.config.extra['mode'])
         self.na_debug = self.config.extra['debug']
         self._max_concurrency = 10
+        self._num_db_connections = 2
         self._current_concurrency = 0
         self._invocations_served = 0
         self.user_list = user_list(debug = self.na_debug)
+
+        if self.config.extra['mode'] == 'o':
+            self.db_connection = [na.NeuroArch( 
+                                    self.config.extra['database'],
+                                    user = self.config.extra['username'],
+                                    password = self.config.extra['password'],
+                                    port = self.config.extra['port'],
+                                    mode = self.config.extra['mode'])]
+            self.db_connection.extend([na.NeuroArch( 
+                                    self.config.extra['database'],
+                                    user = self.config.extra['username'],
+                                    password = self.config.extra['password'],
+                                    port = self.config.extra['port'],
+                                    mode = 'w')
+                                    for i in range(self._num_db_connections-1)])
+        else:
+            self.db_connection = [na.NeuroArch( 
+                                    self.config.extra['database'],
+                                    user = self.config.extra['username'],
+                                    password = self.config.extra['password'],
+                                    port = self.config.extra['port'],
+                                    mode = self.config.extra['mode'])
+                                for i in range(self._num_db_connections)]
+
+        self.db_busy = [False]*self._num_db_connections
+        self.db_counter = [0]*self._num_db_connections
+        self.next_db_to_use = 0
 
         arg_kws = ['color']
 
@@ -725,6 +1055,148 @@ class AppSession(ApplicationSession):
                              'unpin': 'unpin'}
 
         @inlineCallbacks
+        def db_query(query_type, user_id, db_id, task, threshold):
+            """
+            This RPC is created to ensure that a single db_connection is called one at a time.
+            """
+            self.db_busy[db_id] = True
+            db = self.db_connection[db_id]
+            server = self.user_list.user(user_id, db, db_id)['server']
+            if server.db is not db:
+                raise ValueError("user using a different db connection from the one assigned to the RPC.")
+            
+            if query_type == "na_query":
+                (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
+                if not succ:
+                    if isinstance(res, (PyOrientConnectionException, OSError)):
+                        self.log.info("attempt to restart connection to DB.")
+                        # self.db_connection.reconnect()
+                        db.reconnect()
+                        server = self.user_list.user(user_id, db, db_id, force_reconnect = True)['server']
+                        (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
+                if succ:
+                    result_id = self.user_list.add_result(user_id, res)
+                    self.db_busy[db_id] = False
+                    returnValue([succ, result_id])
+                else:
+                    self.db_busy[db_id] = False
+                    returnValue([succ, -1])
+            elif query_type == "get_data":
+                (res, succ) = yield threads.deferToThread(server.get_data, task)
+
+                if not succ:
+                    if isinstance(res, (PyOrientConnectionException, OSError)):
+                        self.log.info("attempt to restart connection to DB.")
+                        # self.db_connection.reconnect()
+                        db.reconnect()
+                        server = self.user_list.user(user_id, db, db_id, force_reconnect = True)['server']
+                        (res, succ) = yield threads.deferToThread(server.get_data, task)
+                
+                if succ:
+                    if 'FlyCircuit' in res['data']['summary']['data_source']:
+                        try:
+                            flycircuit_data = yield self.call(six.u( 'ffbo.processor.fetch_flycircuit' ), res['data']['summary']['name'])
+                            res['data']['summary']['flycircuit_data'] = flycircuit_data
+                        except:
+                            pass
+                    result_id = self.user_list.add_result(user_id, res)
+                    self.db_busy[db_id] = False
+                    returnValue([succ, result_id])
+                else:
+                    self.db_busy[db_id] = False
+                    returnValue([succ, -1])
+            elif query_type == "create_tag":
+                (output, succ) = yield threads.deferToThread(server.receive_task, {"command":{"retrieve":{"state":0}},"format":"qw"})
+                
+                if isinstance(output, QueryWrapper):
+                    if 'metadata' in task:
+                        result = output.tag_query_result_node(tag=task['tag'],
+                                                            permanent_flag=True,
+                                                            **task['metadata'])
+                    else:
+                        result = output.tag_query_result_node(tag=task['tag'],
+                                                            permanent_flag=True)
+                    if result == -1:
+                        self.db_busy[db_id] = False
+                        returnValue({"info":{"error":"The tag already exists. Please choose a different one"}})
+                    else:
+                        self.db_busy[db_id] = False
+                        returnValue({"info":{"success":"tag created successfully"}})
+
+                else:
+                    self.db_busy[db_id] = False
+                    returnValue({"info":{"error":
+                                    "No data found in current workspace to create tag"}})
+            elif query_type == "retrieve_tag":
+                output, succ = yield threads.deferToThread(server.retrieve_tag, task)
+                result_id = self.user_list.add_result(user_id, output)
+                self.db_busy[db_id] = False
+                returnValue([succ, result_id])
+            elif query_type == "select_datasource":
+                data_source, succ = yield threads.deferToThread(server.select_datasource, task)
+                if data_source is not None:
+                    self.user_list.set_default_datasource(user_id, data_source)
+                self.db_busy[db_id] = False
+                returnValue(succ)
+            elif query_type in ['NeuroArchWrite', 'NeuroArchQuery']:
+                try:
+                    method_name = task['method']
+                    if query_type == 'NeuroArchWrite':
+                        assert method_name in NA_ALLOWED_WRTIE_METHODS, 'Operation {} not allowed.'.format(method_name)
+                    else:
+                        assert method_name in NA_ALLOWED_QUERY_METHODS, 'Operation {} not allowed.'.format(method_name)
+                    args = task['args']
+                    kwargs = task['kwargs']
+
+                    func = getattr(db, method_name)
+                    spec = inspect.getfullargspec(func)
+                    pass_default = False
+                    if 'data_source' in spec.args:
+                        default_length = len(spec.defaults) if spec.defaults is not None else 0
+                        if len(spec.args)-spec.args.index('data_source') <= default_length:
+                            if spec.defaults[-(len(spec.args)-spec.args.index('data_source'))] is None:
+                                if 'data_source' in kwargs and kwargs['data_source'] is None:
+                                    pass_default = True
+                    if pass_default:
+                        kwargs.pop('data_source')
+                        output = yield threads.deferToThread(
+                            func, *args,
+                            data_source = self.user_list.get_default_datasource(user_id),
+                            **kwargs)
+                    else:
+                        output = yield threads.deferToThread(func, *args, **kwargs)
+                    
+                    if issubclass(type(output), models.Node):
+                        data = {output._id: output.get_props()}
+                    elif isinstance(output, list):
+                        data = [{n._id: n.get_props()} if issubclass(type(n), models.Node) else n for n in output]
+                    elif isinstance(output, dict):
+                        if query_type == 'NeuroArchWrite':
+                            data = output
+                        else:
+                            data = {k: {v._id: v.get_props()} if issubclass(type(v), models.Node) else v for k, v in output.items()}
+                    elif isinstance(output, QueryWrapper):
+                        nx_graph = output.get_as('nx')
+                        data = {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}
+                    else:
+                        data = output
+
+                    result_id = self.user_list.add_result(user_id, data)
+                    self.db_busy[db_id] = False
+                    returnValue([True, result_id])
+                
+                except Exception as e:
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                    self.log.error("An error occured executing {} in NeuroArchWrite call:\n".format(method_name) + tb)
+                    self.db_busy[db_id] = False
+                    returnValue([False, tb])
+
+        for i in range(self._num_db_connections):
+            uri = six.u( 'ffbo.na.db_query.{}.{}'.format(details.session, i) )
+            yield self.register(db_query, uri, RegisterOptions(concurrency=1))
+        
+        @inlineCallbacks
         def na_query(task,details=None):
             self._invocations_served += 1
             self._current_concurrency += 1
@@ -733,35 +1205,35 @@ class AppSession(ApplicationSession):
                 task = json.loads(task)
             task = byteify(task)
 
-            user_id = task['user'] if (details.caller_authrole == 'processor' and 'user' in task) \
-                      else details.caller
-
-            if not 'format' in task: task['format'] = 'morphology'
-            threshold = None
-            if details.progress:
-                threshold = task['threshold'] if 'threshold' in task else 20
-            if 'verb' in task and task['verb'] not in ['add','show']: threshold=None
-            if task['format'] not in ['morphology', 'nx']: threshold=None
-
-            self.log.info("na_query() called with task: {task} ,(current concurrency {current_concurrency} of max {max_concurrency})", current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency, task=task)
-
-            server = self.user_list.user(
-                                user_id,
-                                self.db_connection)['server']
-            (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
-
-            if not succ:
-                print("attempt to restart connection to DB.")
-                self.db_connection.reconnect()
-                server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
-                (res, succ) = yield threads.deferToThread(server.receive_task, task, threshold)
-
-            uri = 'ffbo.ui.receive_msg.%s' % user_id
-            if not(type(uri)==six.text_type): uri = six.u(uri)
-            cmd_uri = 'ffbo.ui.receive_cmd.%s' % user_id
-            if not(type(cmd_uri)==six.text_type): cmd_uri = six.u(cmd_uri)
-
             try:
+                user_id = task['user'] if (details.caller_authrole == 'processor' and 'user' in task) \
+                        else details.caller
+
+                if not 'format' in task: task['format'] = 'morphology'
+                threshold = None
+                if details.progress:
+                    threshold = task['threshold'] if 'threshold' in task else 20
+                if 'verb' in task and task['verb'] not in ['add','show']: threshold=None
+                if task['format'] not in ['morphology', 'nx']: threshold=None
+
+                self.log.info("na_query() called with task: {task} ,(current concurrency {current_concurrency} of max {max_concurrency})", current_concurrency=self._current_concurrency, max_concurrency=self._max_concurrency, task=task)
+                
+                db_id, uri = self.get_db_id(user_id)
+                self.db_query_on_start(user_id, db_id, queryID = task.get('queryID', ''))
+
+                self.log.info("Calling db_query with type na_query, user: {}, db: {}".format(user_id, db_id))
+                succ, result_id = yield self.call(uri, 'na_query', user_id, db_id, task, threshold)
+                if succ:
+                    res = self.user_list.get_result(user_id, result_id)
+
+                self.db_query_on_end(user_id, db_id)
+
+                uri = 'ffbo.ui.receive_msg.%s' % user_id
+                if not(type(uri)==six.text_type): uri = six.u(uri)
+                cmd_uri = 'ffbo.ui.receive_cmd.%s' % user_id
+                if not(type(cmd_uri)==six.text_type): cmd_uri = six.u(cmd_uri)
+
+            
                 if succ:
                     yield self.call(uri, {'info':{'success':
                                                   'Fetching results from NeuroArch',
@@ -775,7 +1247,7 @@ class AppSession(ApplicationSession):
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                print("An error occured when calling 'receive_msg':\n" + tb)
+                self.log.error("An error occured when calling 'receive_msg':\n" + tb)
                 self.na_query_on_end()
                 returnValue({'info':{'error':
                                        'Error executing query on NeuroArch'}})
@@ -788,7 +1260,7 @@ class AppSession(ApplicationSession):
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                print("An error occured during 'receive_cmd':\n" + tb)
+                self.log.error("An error occured during 'receive_cmd':\n" + tb)
                 self.na_query_on_end()
                 returnValue({'info':{'error':
                                        'Error executing query on NeuroArch'}})
@@ -800,7 +1272,7 @@ class AppSession(ApplicationSession):
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                print("An error occured during 'verb_translation':\n" + tb)
+                self.log.error("An error occured during 'verb_translation':\n" + tb)
                 self.na_query_on_end()
                 returnValue({'info':{'error':
                                        'Error executing query on NeuroArch'}})
@@ -811,7 +1283,7 @@ class AppSession(ApplicationSession):
                 except Exception as e:
                     exc_type, exc_value, exc_traceback = sys.exc_info()
                     tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                    print("An error occured during 'verb_translation':\n" + tb)
+                    self.log.error("An error occured during 'verb_translation':\n" + tb)
                     self.na_query_on_end()
                     returnValue({'info':{'error':
                                            'Error executing query on NeuroArch'}})
@@ -826,278 +1298,43 @@ class AppSession(ApplicationSession):
                 self.na_query_on_end()
                 returnValue({'info':{'success':'Finished processing command'}})
             else:
-                if ('data_callback_uri' in task and 'queryID' in task):
-                    if threshold:
-                        for c in res:
+                try:
+                    if ('data_callback_uri' in task and 'queryID' in task):
+                        if threshold:
+                            for c in res:
+                                yield self.call(six.u(task['data_callback_uri'] + '.%s' % details.caller),
+                                                {'data': c, 'queryID': task['queryID']})
+                        else:
                             yield self.call(six.u(task['data_callback_uri'] + '.%s' % details.caller),
-                                            {'data': c, 'queryID': task['queryID']})
-                    else:
-                        yield self.call(six.u(task['data_callback_uri'] + '.%s' % details.caller),
-                                            {'data': res, 'queryID': task['queryID']})
-                    self.na_query_on_end()
-                    returnValue({'info': {'success':'Finished fetching all results from database'}})
-                else:
-                    if details.progress and threshold:
-                        for c in res:
-                            yield threads.deferToThread(details.progress, c)
+                                                {'data': res, 'queryID': task['queryID']})
                         self.na_query_on_end()
                         returnValue({'info': {'success':'Finished fetching all results from database'}})
                     else:
-                        self.na_query_on_end()
-                        returnValue({'info': {'success':'Finished fetching all results from database'},
-                                     'data': res})
+                        if details.progress and threshold:
+                            for c in res:
+                                yield threads.deferToThread(details.progress, c)
+                            self.na_query_on_end()
+                            returnValue({'info': {'success':'Finished fetching all results from database'}})
+                        else:
+                            self.na_query_on_end()
+                            returnValue({'info': {'success':'Finished fetching all results from database'},
+                                        'data': res})
+                except Exception as e:
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                    self.log.error("An error occured during 'verb_translation':\n" + tb)
+                    self.na_query_on_end()
+                    returnValue({'info':{'error':
+                                        'Error sending back data.'}})
+
         uri = six.u( 'ffbo.na.query.%s' % str(details.session) )
-        yield self.register(na_query, uri, RegisterOptions(details_arg='details',concurrency=self._max_concurrency//2))
-
-        @inlineCallbacks
-        def get_data_sub(q):
-            res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-            n_obj = q.get_nodes()[0]
-            orid = n_obj._id
-            # ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
-            # if len(ds):
-            #     res['data_source'] = [x.name for x in ds]
-            # else:
-            #     qq = q.get_data_qw()
-            #     ds = [n for n in qq.in_('Owns') if isinstance(n, DataSource)]
-            #     if len(ds):
-            #         res['data_source'] = [x.name for x in ds]
-            #     else:
-            #         res['data_source'] = ['Unknown']
-            ds = q.owned_by(cls='DataSource')
-            if ds.nodes:
-                res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
-            else:
-                ds = q.get_data_qw().owned_by(cls='DataSource')
-                if ds.nodes:
-                    res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
-                else:
-                    res['data_source'] = {'Unknown': ''}
-
-            subdata = q.get_data(cls=['NeurotransmitterData', 'GeneticData'],as_type='nx',edges=False,deepcopy=False).nodes
-            ignore = ['name','uname','label','class']
-            key_map = {'Transmitters': 'transmitters'}#'transgenic_lines': 'Transgenic Lines'}
-            for x in subdata.values():
-                up_data = {(key_map[k] if k in key_map else k ):x[k] for k in x if k not in ignore}
-                res.update(up_data)
-
-            res['orid'] = orid
-            try:
-                res['info'] = n_obj.info;
-            except:
-                res['info'] = {}
-            res = {'summary': res}
-            if 'FlyCircuit' in res['summary']['data_source']:
-                try:
-                    flycircuit_data = yield self.call(six.u( 'ffbo.processor.fetch_flycircuit' ), res['summary']['name'])
-                    res['summary']['flycircuit_data'] = flycircuit_data
-                except:
-                    pass
-
-            arborization_data = q.get_data(cls='ArborizationData', as_type='nx',edges=False,deepcopy=False).nodes
-            ignore = ['name','uname','label','class']
-            up_data = {}
-
-            for x in arborization_data.values():
-                key_map = {k:k for k in x}
-                if 'FlyCircuit' in res['summary']['data_source']:
-                    key_map['dendrites'] = 'inferred_dendritic_segments'
-                    key_map['axons'] = 'inferred_axonal_segments'
-                else:
-                    key_map['dendrites'] = 'input_synapses'
-                    key_map['axons'] = 'output_synapses'
-                up_data.update({key_map[k]:x[k] for k in x if k not in ignore})
-            if up_data: res['summary']['arborization_data'] = up_data
-
-            post_syn=q.gen_traversal_out(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
-            pre_syn=q.gen_traversal_in(['SendsTo',['InferredSynapse', 'Synapse']],min_depth=1)
-
-            post_data = []
-            if self.na_debug:
-                start = time.time()
-            if len(post_syn.nodes):
-                post_syn_dict = {}
-                synapses = post_syn.get_as('nx', edges=False, deepcopy = False)
-                synapse_rids = ','.join(list(synapses.nodes()))
-                n_rec=q._graph.client.command("SELECT $path from (traverse out('SendsTo') FROM [{}] maxdepth 1)".format(synapse_rids))
-                ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
-                neuron_rids = list(set(ntos.keys()))
-                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
-
-                post_rids = ','.join(list(neurons.nodes()))
-                post_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(post_rids,synapse_rids)
-                post_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in q._graph.client.command(post_map_command)] if len(n)==2}
-
-                post_data = []
-                for neu_id, syn_id in ntos.items():
-                    info = {'has_morph': 0, 'has_syn_morph': 0}
-                    info['number'] = synapses.nodes[syn_id].get('N', 1)
-                    info['n_rid'] = neu_id
-                    info['s_rid'] = syn_id
-                    if neu_id in post_map_l:
-                        info['has_morph'] = 1
-                        info['rid'] = post_map_l[neu_id]
-                    if syn_id in post_map_l:
-                        info['has_syn_morph'] = 1
-                        info['syn_rid'] = post_map_l[syn_id]
-                        if 'uname' in synapses.nodes[syn_id]:
-                            info['syn_uname'] = synapses.nodes[syn_id]['uname']
-                    info['inferred'] = (synapses.nodes[syn_id]['class'] == 'InferredSynapse')
-                    info.update(neurons.nodes[neu_id])
-                    post_data.append(info)
-                post_data = sorted(post_data, key=lambda x: x['number'])
-
-            pre_data = []
-            if len(pre_syn.nodes):
-                pre_syn_dict = {}
-                synapses = pre_syn.get_as('nx', edges=False, deepcopy = False)
-                synapse_rids = ','.join(list(synapses.nodes()))
-                n_rec=q._graph.client.command("""SELECT $path from (traverse in('SendsTo') FROM [{}] maxdepth 1)""".format(synapse_rids))
-                ntos = {n[1]:n[0] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in n_rec] if len(n)==2}
-                neuron_rids = list(set(ntos.keys()))
-                neurons = QueryWrapper.from_rids(q._graph, *neuron_rids, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
-
-                pre_rids = ','.join(list(neurons.nodes()))
-                pre_map_command = """select $path from (traverse out('HasData') from [{},{}] maxdepth 1) where @class='MorphologyData'""".format(pre_rids, synapse_rids)
-                pre_map_l = {n[0]:n[1] for n in [re.findall('\#\d+\:\d+', x.oRecordData['$path']) for x in q._graph.client.command(pre_map_command)] if len(n)==2}
-
-                for neu_id, syn_id in ntos.items():
-                    info = {'has_morph': 0, 'has_syn_morph': 0}
-                    info['number'] = synapses.nodes[syn_id].get('N', 1)
-                    info['n_rid'] = neu_id
-                    info['s_rid'] = syn_id
-                    if neu_id in pre_map_l:
-                        info['has_morph'] = 1
-                        info['rid'] = pre_map_l[neu_id]
-                    if syn_id in pre_map_l:
-                        info['has_syn_morph'] = 1
-                        info['syn_rid'] = pre_map_l[syn_id]
-                        if 'uname' in synapses.nodes[syn_id]:
-                            info['syn_uname'] = synapses.nodes[syn_id]['uname']
-                    info['inferred'] = (synapses.nodes[syn_id]['class'] == 'InferredSynapse')
-                    info.update(neurons.nodes[neu_id])
-                    pre_data.append(info)
-                pre_data = sorted(pre_data, key=lambda x: x['number'])
-
-                # Summary PreSyn Information
-                pre_sum = {}
-                for x in pre_data:
-                    cls = x['name'].split('-')[0]
-                    try:
-                        if cls=='5': cls = x['name'].split('-')[:2].join('-')
-                    except Exception as e:
-                        pass
-                    if cls in pre_sum: pre_sum[cls] += x['number']
-                    else: pre_sum[cls] = x['number']
-                pre_N =  np.sum(list(pre_sum.values()))
-                pre_sum = {k: 100*float(v)/pre_N for (k,v) in pre_sum.items()}
-
-                # Summary PostSyn Information
-                post_sum = {}
-                for x in post_data:
-                    cls = x['name'].split('-')[0]
-                    if cls in post_sum: post_sum[cls] += x['number']
-                    else: post_sum[cls] = x['number']
-                post_N =  np.sum(list(post_sum.values()))
-                post_sum = {k: 100*float(v)/post_N for (k,v) in post_sum.items()}
-
-                res.update({
-                    'connectivity':{
-                        'post': {
-                            'details': post_data,
-                            'summary': {
-                                'number': int(post_N),
-                                'profile': post_sum
-                            }
-                        }, 'pre': {
-                            'details': pre_data,
-                            'summary': {
-                                'number': int(pre_N),
-                                'profile': pre_sum
-                            }
-                        }
-                    }
-                })
-            if self.na_debug:
-                print("Finished 'get_data connectivity' in", time.time()-start)
-            returnValue({'data':res})
+        yield self.register(na_query, uri, RegisterOptions(details_arg='details',concurrency=self._max_concurrency))
 
         def is_rid(rid):
             if isinstance(rid, str) and re.search('^\#\d+\:\d+$', rid):
                 return True
             else:
                 return False
-
-        def get_syn_data_sub(q):
-            res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-            synapse = q.get_nodes()[0]
-            syn_id = synapse._id
-            res['orid'] = syn_id
-            ds = q.owned_by(cls='DataSource')
-            if ds.nodes:
-                res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
-            else:
-                ds = q.get_data_qw().owned_by(cls='DataSource')
-                if ds.nodes:
-                    res['data_source'] = {x.name: getattr(x, 'version', '') for x in ds.nodes}
-                else:
-                    res['data_source'] = {'Unknown': ''}
-
-            subdata = q.get_data(cls = ['NeurotransmitterData', 'GeneticData', 'MorphologyData'],
-                                 as_type = 'nx', edges = False, deepcopy = False).nodes
-            ignore = ['name','uname','label','class', 'x', 'y', 'z', 'r', 'parent', 'identifier', 'sample', 'morph_type', 'confidence']
-            key_map = {'Transmitters': 'transmitters', 'N': 'number'}#'transgenic_lines': 'Transgenic Lines'}
-            for x in subdata.values():
-                up_data = {(key_map[k] if k in key_map else k ):x[k] for k in x if k not in ignore}
-                res.update(up_data)
-            for x in res:
-                if x in key_map:
-                    res[key_map[x]] = res[x]
-                    del res[x]
-            if 'region' in res:
-                res['synapse_locations'] = Counter(res['region'])
-                del res['region']
-
-            post_neuron = synapse.out('SendsTo')[0]
-            pre_neuron = synapse.in_('SendsTo')[0]
-
-            post_neuron_morph = [n for n in post_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
-            pre_neuron_morph = [n for n in pre_neuron.out('HasData') if isinstance(n, models.MorphologyData)]
-
-            post_data = []
-            neu_id = post_neuron._id
-            post_neuron = QueryWrapper.from_rids(q._graph, neu_id, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
-            info = {'has_morph': 0, 'has_syn_morph': 0}
-            info['number'] = getattr(synapse, 'N', 1)
-            info['n_rid'] = neu_id
-            if len(post_neuron_morph):
-                info['has_morph'] = 1
-                info['rid'] = post_neuron_morph[0]._id
-            info.update(post_neuron.nodes[neu_id])
-            post_data.append(info)
-
-            pre_data = []
-            neu_id = pre_neuron._id
-            pre_neuron = QueryWrapper.from_rids(q._graph, neu_id, debug = self.na_debug).get_as('nx', edges=False, deepcopy=False)
-            info = {'has_morph': 0, 'has_syn_morph': 0}
-            info['number'] = getattr(synapse, 'N', 1)
-            info['n_rid'] = neu_id
-            if len(pre_neuron_morph):
-                info['has_morph'] = 1
-                info['rid'] = pre_neuron_morph[0]._id
-            info.update(pre_neuron.nodes[neu_id])
-            pre_data.append(info)
-
-            res = {'data':{'summary': res,
-                           'connectivity':{
-                               'post': {
-                                   'details': post_data,
-                               }, 'pre': {
-                                   'details': pre_data,
-                               }}
-                   }}
-            return res
-
 
         @inlineCallbacks
         def na_get_data(task,details=None):
@@ -1110,128 +1347,63 @@ class AppSession(ApplicationSession):
             threshold = None
 
             self.log.info("na_get_data() called with task: {task}",task=task)
-            server = self.user_list.user(
-                            user_id,
-                            self.db_connection)['server']
-            try:
-                if not is_rid(task['id']):
-                    returnValue({})
-                elem = server.graph.get_element(task['id'])
-                q = QueryWrapper.from_objs(server.graph,[elem], self.na_debug)
-                callback = get_data_sub if elem.element_type in ['Neuron', 'NeuronFragment'] else get_syn_data_sub
-                if not (elem.element_type in ['Neuron', 'NeuronFragment', 'Synapse', 'InferredSynapse']):
-                    qn = q.gen_traversal_in(['HasData', 'NeuronAndFragment', 'instanceof'],min_depth=1)
-                    if not qn.nodes:
-                        q = q.gen_traversal_in(['HasData',['Synapse', 'InferredSynapse']],min_depth=1)
-                        if not q.nodes:
-                            raise ValueError('Did not find the Synapse node')
-                    else:
-                        q = qn
-                        callback = get_data_sub
-                #res = yield threads.deferToThread(get_data_sub, q)
-                res = yield callback(q)
-            except (PyOrientConnectionException, ValueError) as e:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                print("An error occured during 'na_get_data':\n" + tb)
-                print("attempt to restart connection to DB.")
-                self.db_connection.reconnect()
-                server = self.user_list.user(user_id, self.db_connection, force_reconnect = True)['server']
-                print('success')
-                try:
-                    if not is_rid(task['id']):
-                        returnValue({})
-                    elem = server.graph.get_element(task['id'])
-                    q = QueryWrapper.from_objs(server.graph,[elem], self.na_debug)
-                    callback = get_data_sub if elem.element_type in ['Neuron', 'NeuronFragment'] else get_syn_data_sub
-                    if not (elem.element_type in ['Neuron', 'NeuronFragment', 'Synapse', 'InferredSynapse']):
-                        qn = q.gen_traversal_in(['HasData', 'NeuronAndFragment', 'instanceof'],min_depth=1)
-                        if not qn.nodes:
-                            q = q.gen_traversal_in(['HasData',['Synapse', 'InferredSynapse']],min_depth=1)
-                            if not q.nodes:
-                                raise ValueError('Did not find the Synapse node')
-                        else:
-                            q = qn
-                            callback = get_data_sub
-                    #res = yield threads.deferToThread(get_data_sub, q)
-                    res = yield callback(q)
-                except Exception as e:
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                    print("An error occured during 'na_get_data':\n" + tb)
-                    self.log.failure("Error Retrieveing Data")
-                    res = {}
-            except Exception as e:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                print("An error occured during 'na_get_data':\n" + tb)
-                self.log.failure("Error Retrieveing Data")
-                res = {}
-            returnValue(res)
+
+            if not is_rid(task['id']):
+                returnValue({})
+
+            db_id, uri = self.get_db_id(user_id)
+            self.db_query_on_start(user_id, db_id, task.get('queryID', ''))
+            self.log.info("Calling db_query with type get_data, user: {}, db: {}".format(user_id, db_id))
+            succ, result_id = yield self.call(uri, 'get_data', user_id, db_id, task, threshold)
+            
+            if succ:
+                self.db_query_on_end(user_id, db_id)
+                res = self.user_list.get_result(user_id, result_id)
+                returnValue(res)
+            else:
+                self.db_query_on_end(user_id, db_id)
+                returnValue({'info':{'error':
+                                     'Error retrieving data on NeuroArch'}})
 
         uri = six.u( 'ffbo.na.get_data.%s' % str(details.session) )
-        yield self.register(na_get_data, uri, RegisterOptions(details_arg='details',concurrency=1))
+        yield self.register(na_get_data, uri, RegisterOptions(details_arg='details',concurrency=self._max_concurrency))
 
         # These users can mark a tag as feautured or assign a tag to a festured list
         approved_featured_tag_creators = []
 
         @inlineCallbacks
         def NeuroArchWrite(method_name, *args, details = None, **kwargs):
-            if self.db_connection._mode == 'r':
+            if self.db_connection[0]._mode == 'r':
                 returnValue({'error': {'message': 'Database is not writeable',
                                        'exception': 'Database is not writeable'}})
+            assert method_name in NA_ALLOWED_WRTIE_METHODS, 'Operation {} not allowed.'.format(method_name)
             user_id = details.caller
-            default_ds = self.user_list.user(
-                                user_id,
-                                self.db_connection)['default_datasource']
-            try:
-                assert method_name in NA_ALLOWED_WRTIE_METHODS, 'Operation {} not allowed.'.format(method_name)
-                func = getattr(self.db_connection, method_name)
-                spec = inspect.getfullargspec(func)
-                pass_default = False
-                if 'data_source' in spec.args:
-                    default_length = len(spec.defaults) if spec.defaults is not None else 0
-                    if len(spec.args)-spec.args.index('data_source') <= default_length:
-                        if spec.defaults[-(len(spec.args)-spec.args.index('data_source'))] is None:
-                            if 'data_source' in kwargs and kwargs['data_source'] is None:
-                                pass_default = True
-                if pass_default:
-                    kwargs.pop('data_source')
-                    output = yield threads.deferToThread(
-                        func, *args,
-                        data_source = self.user_list.get_default_datasource(user_id),
-                        **kwargs)
-                else:
-                    output = yield threads.deferToThread(func, *args, **kwargs)
+            started = False
+            try: 
+                db_id, uri = self.get_db_id(user_id)
+                task = {'args': args, 'kwargs': kwargs, 'method': method_name}
+                self.log.info("Calling db_query with type NeuroArchWrite, user: {}, db: {}".format(user_id, db_id))
+                self.db_query_on_start(user_id, db_id)
+                started = True
+                succ, result_id = yield self.call(uri, 'NeuroArchWrite', user_id, db_id, task, None)
 
+                if succ:
+                    self.db_query_on_end(user_id, db_id)
+                    output = self.user_list.get_result(user_id, result_id)
+                else:
+                    self.db_query_on_end(user_id, db_id)
+                    returnValue({'error': {'message': 'Error executing NeuroArchWrite request',
+                                 'exception': result_id}})
+                returnValue({'success': {'data': output}})
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 message = "An error occured during NeuroArch call {}".format(method_name)
-                print(message + ":\n" + tb)
+                self.log.error(message + ":\n" + tb)
+                if started:
+                    self.db_query_on_end(user_id, db_id)
                 returnValue({'error': {'message': message,
                                        'exception': tb}})
-            try:
-                if issubclass(type(output), models.Node):
-                    res = {'success': {'data': {output._id: output.get_props()}}}
-                elif isinstance(output, list):
-                    res = {'success': {'data': [{n._id: n.get_props()} if issubclass(type(n), models.Node) else n for n in output]}}
-                # elif isinstance(output, dict):
-                #     res = {'success': {'data': {k: {v._id: v.get_props()} if issubclass(type(v), models.Node) else v for k, v in output.items()}}}
-                elif isinstance(output, QueryWrapper):
-                    nx_graph = output.get_as('nx')
-                    res = {'success': {'data': {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}}}
-                else:
-                    res = {'success': {'data': output}}
-            except:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                message = "An error occured after NeuroArch write operation {}, database has been updated".format(method_name)
-                print(message + ":\n" + tb)
-                returnValue({'error': {'message': message,
-                                       'exception': tb}})
-            returnValue(res)
-
 
         uri = six.u( 'ffbo.na.NeuroArch.write.{}'.format(str(details.session)) )
         yield self.register(NeuroArchWrite, uri, RegisterOptions(details_arg='details',concurrency=1))
@@ -1239,89 +1411,54 @@ class AppSession(ApplicationSession):
         @inlineCallbacks
         def NeuroArchQuery(method_name, *args, details = None, **kwargs):
             user_id = details.caller
-            default_ds = self.user_list.user(
-                                user_id,
-                                self.db_connection)['default_datasource']
-            try:
-                assert method_name in NA_ALLOWED_QUERY_METHODS, 'Operation {} not allowed.'.format(method_name)
-                func = getattr(self.db_connection, method_name)
-                spec = inspect.getfullargspec(func)
-                pass_default = False
-                if 'data_source' in spec.args:
-                    default_length = len(spec.defaults) if spec.defaults is not None else 0
-                    if len(spec.args)-spec.args.index('data_source') <= default_length:
-                        if spec.defaults[-(len(spec.args)-spec.args.index('data_source'))] is None:
-                            if 'data_source' in kwargs and kwargs['data_source'] is None:
-                                pass_default = True
-                if pass_default:
-                    kwargs.pop('data_source')
-                    output = yield threads.deferToThread(
-                        func, *args,
-                        data_source = self.user_list.get_default_datasource(user_id),
-                        **kwargs)
-                else:
-                    output = yield threads.deferToThread(func, *args, **kwargs)
+            assert method_name in NA_ALLOWED_QUERY_METHODS, 'Operation {} not allowed.'.format(method_name)
+            started = False
+            try: 
+                db_id, uri = self.get_db_id(user_id)
+                task = {'args': args, 'kwargs': kwargs, 'method': method_name}
+                self.log.info("Calling db_query with type NeuroArchQuery, user: {}, db: {}".format(user_id, db_id))
+                self.db_query_on_start(user_id, db_id)
+                started = True
+                succ, result_id = yield self.call(uri, 'NeuroArchQuery', user_id, db_id, task, None)
 
-                if issubclass(type(output), models.Node):
-                    res = {'success': {'data': {output._id: output.get_props()}}}
-                elif isinstance(output, list):
-                    res = {'success': {'data': [{n._id: n.get_props()} if issubclass(type(n), models.Node) else n for n in output]}}
-                elif isinstance(output, dict):
-                    res = {'success': {'data': {k: {v._id: v.get_props()} if issubclass(type(v), models.Node) else v for k, v in output.items()}}}
-                elif isinstance(output, QueryWrapper):
-                    nx_graph = output.get_as('nx')
-                    res = {'success': {'data': {'nodes': dict(nx_graph.nodes(data=True)), 'edges': list(nx_graph.edges(data=True))}}}
+                if succ:
+                    self.db_query_on_end(user_id, db_id)
+                    data = self.user_list.get_result(user_id, result_id)
                 else:
-                    res = {'success': {'data': output}}
+                    self.db_query_on_end(user_id, db_id)
+                    message = "An error occured during NeuroArch call {}".format(method_name)
+                    returnValue({'error': {'message': message,
+                                          'exception': result_id}})
+                returnValue({'success': {'data': data}})
             except Exception as e:
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
                 message = "An error occured during NeuroArch call {}".format(method_name)
-                print(message + ":\n" + tb)
+                self.log.error(message + ":\n" + tb)
+                if started:
+                    self.db_query_on_end(user_id, db_id)
                 returnValue({'error': {'message': message,
                                        'exception': tb}})
-            returnValue(res)
 
         uri = six.u( 'ffbo.na.NeuroArch.query.{}'.format(str(details.session)) )
         yield self.register(NeuroArchQuery, uri, RegisterOptions(details_arg='details',concurrency=1))
 
+        @inlineCallbacks
         def select_datasource(name, version = None, details = None):
             user_id = details.caller
-            default_ds = self.user_list.user(
-                                user_id,
-                                self.db_connection)['default_datasource']
-            obj = self.db_connection._get_obj_from_str(name)
-            if isinstance(obj, models.DataSource):
-                data_source = obj
-            else:
-                try:
-                    datasources = self.db_connection.find_objs('DataSource', name = name, version = version)
-                    if len(datasources) == 1:
-                        data_source = datasources[0]
-                    elif len(datasources) == 0:
-                        return {'error':
-                                    {'message': 'Cannot find DataSource named {name} with version {version}'.format(
-                                            name = name, version = version),
-                                     'exception': ''}}
-                    else:
-                        return {'error':
-                                    {'message': 'Multiple datasources named {name} with version {version} found'.format(
-                                            name = name, version = version),
-                                     'exception': ''}}
-                except Exception as e:
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-                    message = "An error occured during 'select_datasource'"
-                    print(message + ":\n" + tb)
-                    return {'error': {'message': message,
-                                           'exception': tb}}
-            self.user_list.set_default_datasource(user_id, data_source)
-            return {'success': {'message': 'Default datasource set'}}
+            db_id, uri = self.get_db_id(user_id)
+            self.log.info("Calling db_query with type select_datasource, user: {}, db: {}".format(user_id, db_id))
+            self.db_query_on_start(user_id, db_id)
+            succ = yield self.call(uri, 'select_datasource', user_id, db_id,
+                                   {"name": name, "version": version},
+                                   None)
+            self.db_query_on_end(user_id, db_id)
+            returnValue(succ)
 
         uri = six.u( 'ffbo.na.datasource.%s' % str(details.session) )
         yield self.register(select_datasource, uri, RegisterOptions(details_arg='details',concurrency=1))
 
-
+        @inlineCallbacks
         def create_tag(task, details=None):
             if not isinstance(task, dict):
                 task = json.loads(task)
@@ -1342,32 +1479,17 @@ class AppSession(ApplicationSession):
                       else details.caller
             self.log.info("create_tag() called with task: {task} ",task=task)
 
-            server = self.user_list.user(
-                        user_id,
-                        self.db_connection)['server']
-            (output,succ) = server.receive_task({"command":{"retrieve":{"state":0}},"format":"qw"})
-            if not succ:
-                return {"info":{"error":
-                                "There was an error creating the tag"}}
-            if isinstance(output, QueryWrapper):
-                if 'metadata' in task:
-                    succ = output.tag_query_result_node(tag=task['tag'],
-                                                        permanent_flag=True,
-                                                        **task['metadata'])
-                else:
-                    succ = output.tag_query_result_node(tag=task['tag'],
-                                                        permanent_flag=True)
-                if succ==-1:
-                    return {"info":{"error":"The tag already exists. Please choose a different one"}}
-                else:
-                    return {"info":{"success":"tag created successfully"}}
+            db_id, uri = self.get_db_id(user_id)
+            self.log.info("Calling db_query with type create_tag, user: {}, db: {}".format(user_id, db_id))
+            self.db_query_on_start(user_id, db_id)
+            res = yield self.call(uri, 'create_tag', user_id, db_id, task, None)
+            self.db_query_on_end(user_id, db_id)
+            returnValue(res)
 
-            else:
-                return {"info":{"error":
-                                "No data found in current workspace to create tag"}}
         uri = six.u( 'ffbo.na.create_tag.%s' % str(details.session) )
         yield self.register(create_tag, uri, RegisterOptions(details_arg='details',concurrency=1))
 
+        @inlineCallbacks
         def retrieve_tag(task,details=None):
             if not "tag" in task:
                 return {"info":{"error":
@@ -1381,31 +1503,34 @@ class AppSession(ApplicationSession):
                       else details.caller
             self.log.info("retrieve_tag() called with task: {task} ",task=task)
 
-            server = self.user_list.user(
-                            user_id,
-                            self.db_connection)['server']
-            tagged_result = QueryWrapper.from_tag(graph=server.graph, tag=task['tag'], debug = self.na_debug)
-            if tagged_result and tagged_result['metadata'] and tagged_result['metadata']!='{}':
-                server.user.append(tagged_result['qw'])
-                return {'data':tagged_result['metadata'],
-                        'info':{'success':'Server Retrieved Tag Succesfully'}}
+            db_id, uri = self.get_db_id(user_id)
+            self.log.info("Calling db_query with type retrieve_tag, user: {}, db: {}".format(user_id, db_id))
+            self.db_query_on_start(user_id, db_id)
+            succ, result_id = yield self.call(uri, 'retrieve_tag', user_id, db_id, task, None)
+            if succ:
+                self.db_query_on_end(user_id, db_id)
+                res = self.user_list.get_result(user_id, result_id)
+                returnValue({'data':res,
+                             'info':{'success':'Server Retrieved Tag Succesfully'}})
             else:
-                return {"info":{"error":
-                                "No such tag exists in this database server"}}
+                self.db_query_on_end(user_id, db_id)
+                returnValue({"info":{"error":
+                                    "No such tag exists in this database server"}})
 
         uri = six.u( 'ffbo.na.retrieve_tag.%s' % str(details.session) )
         yield self.register(retrieve_tag, uri, RegisterOptions(details_arg='details',concurrency=1))
 
         # Register a function to retrieve a single neuron information
-        def retrieve_neuron(nid):
-            self.log.info("retrieve_neuron() called with neuron id: {nid} ", nid = nid)
-            res = server.retrieve_neuron(nid)
-            print("retrieve neuron result: " + str(res))
-            return res
+        # @inlineCallbacks
+        # def retrieve_neuron(nid):
+        #     self.log.info("retrieve_neuron() called with neuron id: {nid} ", nid = nid)
+        #     res = server.retrieve_neuron(nid)
+        #     print("retrieve neuron result: " + str(res))
+        #     return res
 
-        uri = six.u( 'ffbo.na.retrieve_neuron.%s' % str(details.session) )
-        yield self.register(retrieve_neuron, uri,RegisterOptions(concurrency=self._max_concurrency//2))
-        print("registered %s" % uri)
+        # uri = six.u( 'ffbo.na.retrieve_neuron.%s' % str(details.session) )
+        # yield self.register(retrieve_neuron, uri,RegisterOptions(concurrency=self._max_concurrency//2))
+        # print("registered %s" % uri)
 
 
         # Listen for ffbo.processor.connected
