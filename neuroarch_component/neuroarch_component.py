@@ -424,7 +424,7 @@ class neuroarch_server(object):
     
     def get_data_sub(self, q):
         res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-        n_obj = q.nodes_as_objs[0]
+        n_obj = q.node_objs[0]
         orid = n_obj._id
         ds = q.owned_by(cls='DataSource')
         if ds.nodes:
@@ -535,45 +535,45 @@ class neuroarch_server(object):
                 pre_data.append(info)
             pre_data = sorted(pre_data, key=lambda x: x['number'])
 
-            # Summary PreSyn Information
-            pre_sum = {}
-            for x in pre_data:
-                cls = x['name'].split('-')[0]
-                try:
-                    if cls=='5': cls = x['name'].split('-')[:2].join('-')
-                except Exception as e:
-                    pass
-                if cls in pre_sum: pre_sum[cls] += x['number']
-                else: pre_sum[cls] = x['number']
-            pre_N =  np.sum(list(pre_sum.values()))
-            pre_sum = {k: 100*float(v)/pre_N for (k,v) in pre_sum.items()}
+        # Summary PreSyn Information
+        pre_sum = {}
+        for x in pre_data:
+            cls = x['name'].split('-')[0]
+            try:
+                if cls=='5': cls = x['name'].split('-')[:2].join('-')
+            except Exception as e:
+                pass
+            if cls in pre_sum: pre_sum[cls] += x['number']
+            else: pre_sum[cls] = x['number']
+        pre_N =  np.sum(list(pre_sum.values()))
+        pre_sum = {k: 100*float(v)/pre_N for (k,v) in pre_sum.items()}
 
-            # Summary PostSyn Information
-            post_sum = {}
-            for x in post_data:
-                cls = x['name'].split('-')[0]
-                if cls in post_sum: post_sum[cls] += x['number']
-                else: post_sum[cls] = x['number']
-            post_N =  np.sum(list(post_sum.values()))
-            post_sum = {k: 100*float(v)/post_N for (k,v) in post_sum.items()}
+        # Summary PostSyn Information
+        post_sum = {}
+        for x in post_data:
+            cls = x['name'].split('-')[0]
+            if cls in post_sum: post_sum[cls] += x['number']
+            else: post_sum[cls] = x['number']
+        post_N =  np.sum(list(post_sum.values()))
+        post_sum = {k: 100*float(v)/post_N for (k,v) in post_sum.items()}
 
-            res.update({
-                'connectivity':{
-                    'post': {
-                        'details': post_data,
-                        'summary': {
-                            'number': int(post_N),
-                            'profile': post_sum
-                        }
-                    }, 'pre': {
-                        'details': pre_data,
-                        'summary': {
-                            'number': int(pre_N),
-                            'profile': pre_sum
-                        }
+        res.update({
+            'connectivity':{
+                'post': {
+                    'details': post_data,
+                    'summary': {
+                        'number': int(post_N),
+                        'profile': post_sum
+                    }
+                }, 'pre': {
+                    'details': pre_data,
+                    'summary': {
+                        'number': int(pre_N),
+                        'profile': pre_sum
                     }
                 }
-            })
+            }
+        })
         if self.debug:
             print("Finished 'get_data connectivity' in", time.time()-start)
         return {'data':res}
@@ -582,7 +582,7 @@ class neuroarch_server(object):
 
     def get_syn_data_sub(self, q):
         res = list(q.get_as('nx', edges = False, deepcopy = False).nodes.values())[0]
-        synapse = q.nodes_as_objs[0]
+        synapse = q.node_objs[0]
         syn_id = synapse._id
         res['orid'] = syn_id
         ds = q.owned_by(cls='DataSource')
