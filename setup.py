@@ -63,7 +63,7 @@ if __name__ == "__main__":
             'autobahn[twisted]',
             'six',
             'numpy',
-            'neuroarch',
+            'neuroarch >= 0.4',
             'configparser',
             'pyopenssl',
             'txaio',
