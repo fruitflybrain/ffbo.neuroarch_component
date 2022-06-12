@@ -15,13 +15,13 @@ from setuptools import find_packages
 from setuptools import setup
 
 NAME =               'neuroarch_component'
-VERSION =            '0.3.0'
+VERSION =            '0.4.0'
 AUTHOR =             'Adam Tomkins, Nikul Ukani, Yiyin Zhou'
 AUTHOR_EMAIL =       'a.tomkins@shef.ac.uk, nikul@ee.columbia.edu, yiyin@ee.columbia.edu'
 MAINTAINER =         'Yiyin Zhou'
 MAINTAINER_EMAIL =   'yiyin@ee.columbia.edu'
 DESCRIPTION =        'A wrapper for a neuroarch to enable rpc communication'
-URL =                'TBD'
+URL =                'https://github.com/fruitflybrain/ffbo.neuroarch_component'
 LONG_DESCRIPTION =   DESCRIPTION
 DOWNLOAD_URL =       URL
 LICENSE =            'BSD'
