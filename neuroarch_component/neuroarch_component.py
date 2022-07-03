@@ -1020,7 +1020,8 @@ class AppSession(ApplicationSession):
                                     user = self.config.extra['username'],
                                     password = self.config.extra['password'],
                                     port = self.config.extra['port'],
-                                    mode = self.config.extra['mode'])]
+                                    mode = self.config.extra['mode'],
+                                    version = "")]
             self.db_connection.extend([na.NeuroArch( 
                                     self.config.extra['database'],
                                     user = self.config.extra['username'],
@@ -1034,7 +1035,8 @@ class AppSession(ApplicationSession):
                                     user = self.config.extra['username'],
                                     password = self.config.extra['password'],
                                     port = self.config.extra['port'],
-                                    mode = self.config.extra['mode'])
+                                    mode = self.config.extra['mode'],
+                                    version = "")
                                 for i in range(self._num_db_connections)]
 
         self.db_busy = [False]*self._num_db_connections
