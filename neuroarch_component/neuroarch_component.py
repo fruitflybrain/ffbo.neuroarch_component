@@ -198,7 +198,7 @@ class neuroarch_server(object):
         elif verb == 'remove':
             assert(len(user.state)>=2)
             user.state[-1] = user.state[-2] - output
-        elif verb in ['color', 'hide', 'unhide', 'pin', 'unpin']:
+        elif verb in ['color', 'hide', 'unhide', 'reveal', 'pin', 'unpin']:
             if isinstance(output, list) and len(output) == 0:
                 user.state.pop(-1)
                 if len(user.state) > 1:
@@ -1048,6 +1048,7 @@ class AppSession(ApplicationSession):
         reactor.suggestThreadPoolSize(self._max_concurrency*2)
         verb_translations = {'hide': 'hide',
                              'unhide': 'show',
+                             'reveal': 'show',
                              'color': 'setcolor',
                              'keep' : 'remove',
                              'blink' : 'animate',
