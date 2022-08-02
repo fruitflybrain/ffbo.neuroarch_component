@@ -123,6 +123,7 @@ NA_ALLOWED_WRTIE_METHODS = [
     'add_Subregion',
     'add_Circuit',
     'add_Neuron',
+    'add_NeuronFragment',
     'add_Synapse',
     'add_InferredSynapse',
     'add_morphology',
@@ -136,6 +137,7 @@ NA_ALLOWED_WRTIE_METHODS = [
     'remove_Synapses',
     'remove_Synapses_between',
     'create_model_from_circuit',
+    'flush_edges'
 ]
 
 NA_ALLOWED_QUERY_METHODS = [
