@@ -77,7 +77,7 @@ realm = config["SERVER"]["realm"]
 authentication = eval(config["AUTH"]["authentication"])
 debug = eval(config["DEBUG"]["debug"])
 ca_cert_file = config["AUTH"]["ca_cert_file"]
-intermediate_cert_file = config["AUTH"]["intermediate_cert_file"]
+#intermediate_cert_file = config["AUTH"]["intermediate_cert_file"]
 
 # Required to handle dill's inability to serialize namedtuple class generator:
 setattr(pyorient.ogm.graph, 'orientdb_version',
@@ -1704,9 +1704,9 @@ if __name__ == '__main__':
     parser.add_argument('--ca_cert', dest='ca_cert_file', type=six.text_type,
                         default=ca_cert_file,
                         help='Root CA PEM certificate file (defaults to value from config.ini).')
-    parser.add_argument('--int_cert', dest='intermediate_cert_file', type=six.text_type,
-                        default=intermediate_cert_file,
-                        help='Intermediate PEM certificate file (defaults to value from config.ini).')
+    #parser.add_argument('--int_cert', dest='intermediate_cert_file', type=six.text_type,
+    #                    default=intermediate_cert_file,
+    #                    help='Intermediate PEM certificate file (defaults to value from config.ini).')
     parser.add_argument('--no-ssl', dest='ssl', action='store_false')
     parser.add_argument('--database', dest='db', type=six.text_type, default='na_server',
                         help='Orientdb database folder name.')
@@ -1762,10 +1762,10 @@ if __name__ == '__main__':
         c=OpenSSL.crypto
         ca_cert=c.load_certificate(c.FILETYPE_PEM, st_cert)
 
-        st_cert=open(args.intermediate_cert_file, 'rt').read()
-        intermediate_cert=c.load_certificate(c.FILETYPE_PEM, st_cert)
+        #st_cert=open(args.intermediate_cert_file, 'rt').read()
+        #intermediate_cert=c.load_certificate(c.FILETYPE_PEM, st_cert)
 
-        certs = OpenSSLCertificateAuthorities([ca_cert, intermediate_cert])
+        certs = OpenSSLCertificateAuthorities([ca_cert])#, intermediate_cert])
         ssl_con = CertificateOptions(trustRoot=certs)
 
         # now actually run a WAMP client using our session class ClientSession
