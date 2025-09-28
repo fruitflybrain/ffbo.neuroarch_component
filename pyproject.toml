@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuroarch_component"
+version = "0.4.1"
+description = "A wrapper for a neuroarch to enable rpc communication"
+license = { text = "BSD" }
+authors = [
+  { name = "Adam Tomkins", email = "a.tomkins@shef.ac.uk" },
+  { name = "Nikul Ukani",  email = "nikul@ee.columbia.edu" },
+  { name = "Yiyin Zhou",   email = "yiyin.zhou@fordham.edu" }
+]
+maintainers = [
+  { name = "Yiyin Zhou", email = "yiyin.zhou@fordham.edu" }
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Software Development"
+]
+dependencies = [
+  "simplejson",
+  "autobahn[twisted]",
+  "six",
+  "numpy",
+  "neuroarch>=0.4.3",
+  "configparser",
+  "pyopenssl",
+  "txaio",
+  "msgpack",
+  "msgpack-numpy",
+  "service-identity"
+]
+
+[project.urls]
+Homepage = "https://github.com/fruitflybrain/ffbo.neuroarch_component"
+Download = "https://github.com/fruitflybrain/ffbo.neuroarch_component"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["neuroarch_component*"]
