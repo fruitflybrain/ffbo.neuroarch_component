@@ -1758,19 +1758,23 @@ if __name__ == '__main__':
              'dataset': dataset, 'name': name, 'mode': args.mode}
 
     if args.ssl:
-        st_cert=open(args.ca_cert_file, 'rt').read()
-        c=OpenSSL.crypto
-        ca_cert=c.load_certificate(c.FILETYPE_PEM, st_cert)
+        import re
+        from OpenSSL import crypto
 
-        #st_cert=open(args.intermediate_cert_file, 'rt').read()
-        #intermediate_cert=c.load_certificate(c.FILETYPE_PEM, st_cert)
+        with open(args.ca_cert_file, 'rt') as f:
+            ca_data = f.read()
 
-        certs = OpenSSLCertificateAuthorities([ca_cert])#, intermediate_cert])
+        pem_blocks = re.findall(
+            r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----',
+            ca_data, re.DOTALL)
+        ca_certs = [crypto.load_certificate(crypto.FILETYPE_PEM, b)
+                    for b in pem_blocks]
+
+        certs = OpenSSLCertificateAuthorities(ca_certs)
         ssl_con = CertificateOptions(trustRoot=certs)
 
-        # now actually run a WAMP client using our session class ClientSession
-        runner = ApplicationRunner(url = args.url, realm = args.realm,
-                                   extra = extra, ssl = ssl_con)
+        runner = ApplicationRunner(url=args.url, realm=args.realm,
+                                   extra=extra, ssl=ssl_con)
 
     else:
         # now actually run a WAMP client using our session class ClientSession
